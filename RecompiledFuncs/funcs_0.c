@@ -17189,6 +17189,7 @@ RECOMP_FUNC void func_800165F0(uint8_t* rdram, recomp_context* ctx) {
     // 0x80016618: addiu       $a0, $a0, -0x64C0
     ctx->r4 = ADD32(ctx->r4, -0X64C0);
     after_1:
+    tooie_breegull_hook_pad(rdram, ctx);
     // 0x8001661C: lw          $ra, 0x14($sp)
     ctx->r31 = MEM_W(ctx->r29, 0X14);
 L_80016620:

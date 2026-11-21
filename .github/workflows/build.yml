@@ -59,6 +59,12 @@ jobs:
       - name: Test neutral camera behavior and live speed changes
         run: cmd /c "build_bt.bat TooieCameraSettingsTests && build-cmake\TooieCameraSettingsTests.exe"
 
+      - name: Verify Breegull native TOML hooks
+        run: python tools/tests/test_breegull_hooks.py
+
+      - name: Test Breegull N64 input translation
+        run: cmd /c "build_bt.bat TooieBreegullControlsTests && build-cmake\TooieBreegullControlsTests.exe"
+
       - name: Verify executable and package inputs
         shell: pwsh
         run: |

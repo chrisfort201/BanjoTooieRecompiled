@@ -7892,6 +7892,7 @@ RECOMP_FUNC void bsfirstp_entrypoint_0(uint8_t* rdram, recomp_context* ctx) {
 RECOMP_FUNC void bsfirstp_entrypoint_1(uint8_t* rdram, recomp_context* ctx) {
     uint64_t hi = 0, lo = 0, result = 0;
     int c1cs = 0;
+    tooie_breegull_hook_player(rdram, ctx);
     // 0x808000E4: addiu       $sp, $sp, -0x20
     ctx->r29 = ADD32(ctx->r29, -0X20);
     // 0x808000E8: sw          $ra, 0x1C($sp)

@@ -610,3 +610,16 @@ text = "tooie_camera_hook_tick(rdram, ctx, 0);"
 func = "func_80112A84"
 before_vram = 0x80112C28
 text = "tooie_camera_hook_tick(rdram, ctx, 1);"
+
+# Modern Breegull Blaster control translation: mode observation happens only
+# in the first-person player overlay; N64 pad translation happens immediately
+# after the original controller read. Both are inert when the option is off.
+[[patches.hook]]
+func = "bsfirstp_entrypoint_1"
+before_vram = 0x808000E4
+text = "tooie_breegull_hook_player(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_800165F0"
+before_vram = 0x8001661C
+text = "tooie_breegull_hook_pad(rdram, ctx);"

@@ -109,6 +109,8 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/camera_options.cpp
     ${CMAKE_SOURCE_DIR}/src/camera_config.cpp
     ${CMAKE_SOURCE_DIR}/src/camera_diagnostics.cpp
+    ${CMAKE_SOURCE_DIR}/src/breegull_controls.cpp
+    ${CMAKE_SOURCE_DIR}/src/breegull_config.cpp
     ${CMAKE_SOURCE_DIR}/src/register_overlays.cpp
     ${CMAKE_SOURCE_DIR}/src/rom_decompression.cpp
     ${CMAKE_SOURCE_DIR}/rsp/n_aspMain.cpp
@@ -314,6 +316,14 @@ add_executable(TooieCameraSettingsTests EXCLUDE_FROM_ALL
 target_include_directories(TooieCameraSettingsTests PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${N64MODERNRUNTIME_DIR}/N64Recomp/include
+)
+
+# Host-only deterministic tests for the controller packet translation.
+add_executable(TooieBreegullControlsTests EXCLUDE_FROM_ALL
+    ${CMAKE_SOURCE_DIR}/tools/tests/breegull_remap_test.cpp
+)
+target_include_directories(TooieBreegullControlsTests PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
 )
 
 # The version the executable reports. The release workflow sets BT_VERSION to

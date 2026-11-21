@@ -57,6 +57,7 @@
 #include "rom_decompression.hpp"
 #include "tooie_visibility.hpp"
 #include "tooie_camera_settings.hpp"
+#include "tooie_breegull_settings.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -150,6 +151,7 @@ void update_gfx(void*) {
         std::fflush(stderr);
     }
     recompinput::handle_events();
+    tooie::breegull::sample_right_stick();
     int width = 0, height = 0;
     SDL_GetWindowSize(window, &width, &height);
     tooie::visibility::update_display_size(width, height);
@@ -369,10 +371,12 @@ void initialize_config() {
     recompui::config::create_graphics_tab();
     recompui::config::create_controls_tab();
     tooie::camera::register_config_tab();
+    tooie::breegull::register_config_tab();
     recompui::config::create_sound_tab();
     recompui::config::create_mods_tab();
     recompui::config::finalize();
     tooie::camera::apply_loaded_config();
+    tooie::breegull::apply_loaded_config();
 }
 
 // The launcher wallpaper.

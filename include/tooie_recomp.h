@@ -9,6 +9,7 @@
 
 #include "recomp.h"
 #include "tooie_camera_options.h"
+#include "tooie_breegull_controls.h"
 
 #ifdef __cplusplus
 extern "C" {
