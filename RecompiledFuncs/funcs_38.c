@@ -376,6 +376,7 @@ RECOMP_FUNC void func_80112A84(uint8_t* rdram, recomp_context* ctx) {
     ctx->r14 = MEM_W(ctx->r4, 0X60);
     // 0x80112A94: or          $s0, $a0, $zero
     ctx->r16 = ctx->r4 | 0;
+    tooie_camera_hook_tick(rdram, ctx, 0);
     // 0x80112A98: addiu       $t8, $zero, 0x5
     ctx->r24 = ADD32(0, 0X5);
     // 0x80112A9C: lh          $t7, 0xC($t6)
@@ -675,6 +676,7 @@ L_80112C18:
     // 0x80112C24: lw          $a3, 0x64($sp)
     ctx->r7 = MEM_W(ctx->r29, 0X64);
     after_10:
+    tooie_camera_hook_tick(rdram, ctx, 1);
     // 0x80112C28: lw          $ra, 0x24($sp)
     ctx->r31 = MEM_W(ctx->r29, 0X24);
     // 0x80112C2C: lw          $s0, 0x20($sp)

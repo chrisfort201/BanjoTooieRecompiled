@@ -550,3 +550,37 @@ text = "tooie_expand_pickup_scope(rdram, ctx, 2);"
 func = "func_800DE498"
 before_vram = 0x800DE6E0
 text = "tooie_expand_pickup_radius(rdram, ctx);"
+
+# Manual third-person yaw. These hooks are the source of truth for camera
+# enhancements; RecompiledFuncs/ holds the checked-in generated equivalent.
+# func_801111D0 has only two direct callers, the left/right branches of
+# func_80110E00, so input inversion cannot change first-person C-button aim.
+[[patches.hook]]
+func = "func_801111D0"
+before_vram = 0x801111D0
+text = "tooie_camera_hook_invert(rdram, ctx);"
+
+# After the original MIPS 'lui $a2, 0x4234' sets 45.0f, before the
+# transition request. No controller input or scripted cameras are changed.
+[[patches.hook]]
+func = "func_801111D0"
+before_vram = 0x80111294
+text = "tooie_camera_hook_rate(rdram, ctx);"
+
+# Optional tracing of whether the original transition routine accepted the
+# requested change. The helper is a no-op unless debug_trace is enabled.
+[[patches.hook]]
+func = "func_801111D0"
+before_vram = 0x8011129C
+text = "tooie_camera_hook_rate_complete(rdram, ctx);"
+
+# Original per-frame transition update, observed without changing the engine.
+[[patches.hook]]
+func = "func_80112A84"
+before_vram = 0x80112A98
+text = "tooie_camera_hook_tick(rdram, ctx, 0);"
+
+[[patches.hook]]
+func = "func_80112A84"
+before_vram = 0x80112C28
+text = "tooie_camera_hook_tick(rdram, ctx, 1);"

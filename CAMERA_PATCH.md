@@ -1,91 +1,75 @@
-# Experimental camera-only controls for Banjo-Tooie: Recompiled
+# Third-person manual camera controls — native hook implementation
 
-This patch targets Vidanox/BanjoTooieRecompiled, commit
-`9e5852541ba1436417e2c4468960e8c6de6deda5`.
+This feature starts from Vidanox/BanjoTooieRecompiled at
+`9e5852541ba1436417e2c4468960e8c6de6deda5`. The fork's `camera-controls`
+branch currently has the original experimental camera implementation and a
+Windows-only workflow. This revision **moves the behavior to N64Recomp's native
+hook configuration**; it is not a new input remapping layer.
 
-The port's original controller bindings are unchanged. In particular, C-left
-and C-right keep their normal meanings while aiming eggs in first person and
-using contextual actions.
+## Authoritative source and generated counterpart
 
-## Configure
+- `banjotooie.us.toml` contains five `[[patches.hook]]` entries targeting the
+  original game's **instruction addresses**.
+- `src/camera_options.cpp` implements inversion and the speed option in host
+  C++. `src/camera_diagnostics.cpp` implements optional, passive logging.
+- `RecompiledFuncs/funcs_37.c` and `funcs_38.c` contain the **committed generated
+  C counterpart** of those TOML hooks. Vidanox's repository commits generated
+  functions so normal builds do not require a ROM or a working recompiler.
+  These generated copies are build artifacts, **not feature source**.
+- `tools/tests/test_camera_hooks.py` verifies that the TOML hook declarations
+  and their committed C counterparts agree at the documented instruction sites.
 
-Edit `camera.ini` next to the executable (the working directory used for
-`assets/`) and restart the game:
+A real re-generation via Vidanox's patched N64Recomp and the correct ROM still
+needs to be checked before upstream submission; that cannot be performed in a
+ROM-free sandbox. Do not hand-edit generated C to change camera behavior.
+
+## Camera call chain
+
+`func_800A4878` dispatches manual third-person camera input;
+`func_80110E00` selects -45° or +45° and calls `func_801111D0` (only two
+static callsites in the committed code). The `0x801111D0` hook can therefore
+invert that **manual yaw argument** without changing the actual C-buttons.
+
+At `0x80111294`, after the game's `lui $a2, 0x4234` sets 45.0f and before
+calling `func_80112D90`, a second hook applies the configured rotation-rate
+multiplier. `func_80112D90` is the transition setup and contains priority
+checks. `func_80112A84` advances the transition per frame. We have **not yet
+verified** that this rate parameter controls perceived camera yaw linearly:
+user testing of the previous implementation found little or no change.
+The new hook organization does not pretend that problem is fixed.
+
+## Configure / test
+
+`camera.ini` in the game's working directory (alongside `assets/`):
 
 ```ini
 invert_horizontal = true
 rotation_speed = 2.5
+debug_trace = false
 ```
 
-* `invert_horizontal`: `true` or `false` (original = `false`).
-* `rotation_speed`: a number between `1.0` and `4.0` (original = `1.0`).
-* Removing `camera.ini` restores original behavior for both settings.
-* **Restore normal right-stick/C-button mappings in the game's controller
-  settings.** This is required to avoid reversing first-person aiming twice.
+- `invert_horizontal = false`, `rotation_speed = 1.0` restores the original
+  camera parameters. Controller bindings should remain unmodified.
+- `rotation_speed` accepts `1.0` through `4.0`. This is currently an experimental
+  **rate parameter**, not yet a validated multiplier of actual degrees/second.
+- Enable `debug_trace = true` temporarily to append `camera-debug.csv` in the
+  game's working directory. Run at 1.0, then at 4.0, with one short left/right
+  camera turn each. Fully exit between runs. Send both logs for comparison.
+- The trace records the transition request, state before/after setup and up to
+  100 before/after samples from its original per-frame update. It is bounded to
+  80 requests per session. It does not change camera data.
 
-This patch does not add a graphical settings menu. Settings load once per
-process; edit the file while the game is closed.
+The camera is still limited to the game's original manual yaw target/behavior.
+This patch does not implement full right-stick free-look, vertical movement,
+new camera interpolation, or a graphical settings menu.
 
-## Scope of the change
+## Build and PR readiness
 
-The game input dispatcher at `func_800A4878` calls
-`bainput_should_rotate_camera_left/right` (functions `func_80097B70` and
-`func_80097B94`). Its manual camera requests are forwarded to
-`func_80110EFC` with action values 0 (left) and 1 (right).
+The existing `camera-windows.yml` workflow is unchanged by this revision; it
+already uses `windows-2022`. Push to `camera-controls` to run the Windows build.
 
-`func_80110EFC` calls `func_80110E00`, which passes **-45.0f or +45.0f**
-to `func_801111D0`. Two specific additions to the generated C in
-`RecompiledFuncs/funcs_37.c` optionally flip the sign of these target-angle
-deltas. They do not swap C-buttons or alter first-person input.
-
-`func_801111D0` passes **45.0f** as the turn-rate parameter to
-`func_80112D90`. Another specific addition scales this parameter by the
-requested multiplier. `func_80112D90` divides the angular difference by
-this value to set its transition duration; larger values should yield faster
-transitions while preserving the original +/-45-degree target turns.
-
-Caller search in the supplied generated C found that `func_801111D0` is
-called only twice, both from `func_80110E00`'s manual left/right branches.
-Thus this change is scoped to manual third-person yaw, rather than scripted
-cameras or movement.
-
-These modifications are in *committed generated C*. Regenerating
-`RecompiledFuncs/` from a ROM and TOML will overwrite them. If the source is
-regenerated later, reapply the generated-C hunks.
-
-## Build from the public fork
-
-A separate workflow `.github/workflows/camera-windows.yml` performs only the
-Windows x64 build and uploads a ZIP artifact. It runs on pushes to a branch
-called **`camera-controls`**; it does not publish a release. Keep the branch
-separate from `main` so the upstream `build.yml` workflow does not run its
-Windows/Linux/Flatpak/release jobs.
-
-Example PowerShell commands from your existing local clone, assuming `main`
-is at the target commit and your working tree has no unrelated modifications:
-
-```powershell
-git switch -c camera-controls
-git apply .\BanjoTooie-camera-controls.patch
-git add .
-git commit -m "Add configurable camera-only inversion and faster yaw"
-git push -u origin camera-controls
-```
-
-Then open your fork's **Actions** tab -> **Camera controls - Windows x64** ->
-the push run -> **Artifacts** -> `BanjoTooieRecompiled-camera-windows-x64`.
-The ZIP contains the Windows executable, runtime DLLs, assets, and `camera.ini`.
-
-## Verification and limitations
-
-* The code changes and standalone camera-option helpers have been examined;
-  they still require a Windows build and gameplay verification.
-* This environment does not contain the four required Git submodules, so a
-  complete Windows build cannot be validated locally.
-* Without running the game, we cannot guarantee the sign convention, actual
-  perceived speed increase, or compatibility with every camera mode.
-* If the manual camera stops rotating correctly, first try
-  `rotation_speed = 1.0` and `invert_horizontal = false`; this is an
-  experimental patch, **not a tested binary**.
-* Gameplay mechanics, scripted cameras, global controller bindings and
-  first-person aim have no direct source changes in this patch.
+The core architecture is suitable for review because the hooks live in TOML,
+are implemented in dedicated native source, and the committed C mirrors them.
+This is **not yet a finished PR**: the speed behavior requires runtime traces,
+the graphical configuration may merit integration into the existing launcher,
+and the generated output needs an upstream-style regeneration check with ROM.

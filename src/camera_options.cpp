@@ -16,6 +16,7 @@ namespace {
 struct CameraOptions {
     bool invert_horizontal = false;
     float rotation_speed = 1.0f;
+    bool debug_trace = false;
 };
 
 std::string trim(std::string text) {
@@ -49,6 +50,9 @@ CameraOptions read_options() {
             } else if (value == "false" || value == "off" || value == "no" || value == "0") {
                 options.invert_horizontal = false;
             }
+        } else if (key == "debug_trace") {
+            options.debug_trace = value == "true" || value == "on" ||
+                                  value == "yes" || value == "1";
         } else if (key == "rotation_speed") {
             char* end = nullptr;
             const float parsed = std::strtof(value.c_str(), &end);
@@ -84,4 +88,36 @@ extern "C" uint32_t tooie_camera_manual_speed_bits(void) {
     static_assert(sizeof bits == sizeof scaled);
     std::memcpy(&bits, &scaled, sizeof bits);
     return bits;
+}
+
+
+// These host-side helpers are invoked by N64Recomp's configured hook points.
+// They must preserve all registers except the specifically modified argument.
+extern "C" void tooie_camera_hook_invert(uint8_t*, recomp_context* ctx) {
+    ctx->r5 = static_cast<int32_t>(tooie_camera_manual_yaw_bits(
+        static_cast<uint32_t>(ctx->r5)));
+}
+
+// Implemented in camera_diagnostics.cpp; disabled by default.
+extern "C" void tooie_camera_trace_before(uint8_t*, uint32_t, uint32_t, uint32_t);
+extern "C" void tooie_camera_trace_after(uint8_t*);
+extern "C" void tooie_camera_trace_tick(uint8_t*, uint32_t, int);
+
+extern "C" void tooie_camera_hook_rate(uint8_t* rdram, recomp_context* ctx) {
+    ctx->r6 = static_cast<int32_t>(tooie_camera_manual_speed_bits());
+    if (options().debug_trace) {
+        tooie_camera_trace_before(rdram, static_cast<uint32_t>(ctx->r4),
+                                  static_cast<uint32_t>(ctx->r5),
+                                  static_cast<uint32_t>(ctx->r6));
+    }
+}
+
+extern "C" void tooie_camera_hook_rate_complete(uint8_t* rdram, recomp_context*) {
+    if (options().debug_trace) tooie_camera_trace_after(rdram);
+}
+
+extern "C" void tooie_camera_hook_tick(uint8_t* rdram, recomp_context* ctx, int after) {
+    if (options().debug_trace) {
+        tooie_camera_trace_tick(rdram, static_cast<uint32_t>(ctx->r16), after);
+    }
 }
