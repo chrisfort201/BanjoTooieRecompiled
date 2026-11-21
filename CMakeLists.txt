@@ -106,6 +106,7 @@ add_executable(BanjoTooieRecompiled)
 set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/main.cpp
     ${CMAKE_SOURCE_DIR}/src/recomp_api.cpp
+    ${CMAKE_SOURCE_DIR}/src/camera_options.cpp
     ${CMAKE_SOURCE_DIR}/src/register_overlays.cpp
     ${CMAKE_SOURCE_DIR}/src/rom_decompression.cpp
     ${CMAKE_SOURCE_DIR}/rsp/n_aspMain.cpp

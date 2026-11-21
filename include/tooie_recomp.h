@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "recomp.h"
+#include "tooie_camera_options.h"
 
 #ifdef __cplusplus
 extern "C" {

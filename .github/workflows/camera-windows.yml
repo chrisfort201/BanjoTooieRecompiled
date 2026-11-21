@@ -1,0 +1,102 @@
+name: Camera controls - Windows x64
+
+# Build only the experimental camera-controls branch. Keeping it off main
+# prevents the upstream build.yml workflow from publishing a release or running
+# its Linux and Flatpak jobs. The existing workflow is unchanged.
+on:
+  push:
+    branches: [camera-controls]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out source and pinned submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Apply project dependency patches
+        run: python tools/setup_deps.py
+
+      - name: Verify dependency patches
+        run: python tools/setup_deps.py --check
+
+      - name: Verify clang-cl version
+        shell: pwsh
+        run: |
+          $clang = Get-Command clang-cl.exe -ErrorAction SilentlyContinue
+          $clangPath = if ($clang) { $clang.Source } else { $null }
+          if (-not $clangPath) {
+            foreach ($p in @("$env:ProgramFiles\LLVM\bin\clang-cl.exe",
+                             "${env:ProgramFiles(x86)}\LLVM\bin\clang-cl.exe")) {
+              if (Test-Path $p) { $clangPath = $p; break }
+            }
+          }
+          if (-not $clangPath) { throw 'clang-cl.exe not found' }
+          $dir = Split-Path $clangPath -Parent
+          Add-Content $env:GITHUB_PATH $dir
+          $version = & $clangPath --version | Select-Object -First 1
+          Write-Host $version
+          if ($version -notmatch 'version (\d+)' -or [int]$Matches[1] -lt 19) {
+            throw "LLVM 19 or newer required: $version"
+          }
+
+      - name: Configure
+        env:
+          BT_VERSION: 1.0.0+camera
+        run: cmd /c cmake_configure.bat
+
+      - name: Build
+        run: cmd /c build_bt.bat
+
+      - name: Verify executable and package inputs
+        shell: pwsh
+        run: |
+          $exe = 'build-cmake/BanjoTooieRecompiled.exe'
+          if (-not (Test-Path $exe)) { throw 'Windows executable missing' }
+          $b = [IO.File]::ReadAllBytes($exe)
+          $pe = [BitConverter]::ToInt32($b, 0x3C)
+          $machine = [BitConverter]::ToUInt16($b, $pe + 4)
+          $subsystem = [BitConverter]::ToUInt16($b, $pe + 24 + 68)
+          if ($machine -ne 0x8664) { throw "Unexpected PE architecture: $machine" }
+          if ($subsystem -ne 2) { throw "Unexpected PE subsystem: $subsystem" }
+          if (-not ([Text.Encoding]::ASCII.GetString($b)).Contains('1.0.0+camera')) {
+            throw 'Camera build version is not embedded in the executable'
+          }
+          foreach ($f in @('build-cmake/SDL2.dll',
+                           'build-cmake/dxcompiler.dll',
+                           'build-cmake/dxil.dll',
+                           'build-cmake/assets/recomp.rcss',
+                           'camera.ini')) {
+            if (-not (Test-Path $f)) { throw "Missing file: $f" }
+          }
+          Write-Host 'Windows PE x64 GUI executable and runtime files present'
+
+      - name: Package Windows build
+        shell: pwsh
+        run: |
+          $stage = 'package/BanjoTooieRecompiled'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item 'build-cmake/BanjoTooieRecompiled.exe' $stage
+          Copy-Item @('build-cmake/SDL2.dll',
+                      'build-cmake/dxcompiler.dll',
+                      'build-cmake/dxil.dll') $stage
+          Copy-Item -Recurse 'build-cmake/assets' "$stage/assets"
+          Copy-Item @('camera.ini', 'CAMERA_PATCH.md', 'README.md', 'COPYING') $stage
+          Compress-Archive -Path "$stage/*" -DestinationPath 'package/BanjoTooieRecompiled-camera-windows-x64.zip' -Force
+          Get-FileHash "$stage/BanjoTooieRecompiled.exe" -Algorithm SHA256 | Format-List
+
+      - name: Upload ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: BanjoTooieRecompiled-camera-windows-x64
+          path: package/BanjoTooieRecompiled-camera-windows-x64.zip
+          retention-days: 3
+          if-no-files-found: error

@@ -1,0 +1,390 @@
+diff --git a/.github/workflows/camera-windows.yml b/.github/workflows/camera-windows.yml
+new file mode 100644
+index 0000000..36d705e
+--- /dev/null
++++ b/.github/workflows/camera-windows.yml
+@@ -0,0 +1,102 @@
++name: Camera controls - Windows x64
++
++# Build only the experimental camera-controls branch. Keeping it off main
++# prevents the upstream build.yml workflow from publishing a release or running
++# its Linux and Flatpak jobs. The existing workflow is unchanged.
++on:
++  push:
++    branches: [camera-controls]
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++jobs:
++  build-windows:
++    runs-on: windows-latest
++    timeout-minutes: 60
++    steps:
++      - name: Check out source and pinned submodules
++        uses: actions/checkout@v4
++        with:
++          submodules: recursive
++          fetch-depth: 1
++
++      - name: Apply project dependency patches
++        run: python tools/setup_deps.py
++
++      - name: Verify dependency patches
++        run: python tools/setup_deps.py --check
++
++      - name: Verify clang-cl version
++        shell: pwsh
++        run: |
++          $clang = Get-Command clang-cl.exe -ErrorAction SilentlyContinue
++          $clangPath = if ($clang) { $clang.Source } else { $null }
++          if (-not $clangPath) {
++            foreach ($p in @("$env:ProgramFiles\LLVM\bin\clang-cl.exe",
++                             "${env:ProgramFiles(x86)}\LLVM\bin\clang-cl.exe")) {
++              if (Test-Path $p) { $clangPath = $p; break }
++            }
++          }
++          if (-not $clangPath) { throw 'clang-cl.exe not found' }
++          $dir = Split-Path $clangPath -Parent
++          Add-Content $env:GITHUB_PATH $dir
++          $version = & $clangPath --version | Select-Object -First 1
++          Write-Host $version
++          if ($version -notmatch 'version (\d+)' -or [int]$Matches[1] -lt 19) {
++            throw "LLVM 19 or newer required: $version"
++          }
++
++      - name: Configure
++        env:
++          BT_VERSION: 1.0.0+camera
++        run: cmd /c cmake_configure.bat
++
++      - name: Build
++        run: cmd /c build_bt.bat
++
++      - name: Verify executable and package inputs
++        shell: pwsh
++        run: |
++          $exe = 'build-cmake/BanjoTooieRecompiled.exe'
++          if (-not (Test-Path $exe)) { throw 'Windows executable missing' }
++          $b = [IO.File]::ReadAllBytes($exe)
++          $pe = [BitConverter]::ToInt32($b, 0x3C)
++          $machine = [BitConverter]::ToUInt16($b, $pe + 4)
++          $subsystem = [BitConverter]::ToUInt16($b, $pe + 24 + 68)
++          if ($machine -ne 0x8664) { throw "Unexpected PE architecture: $machine" }
++          if ($subsystem -ne 2) { throw "Unexpected PE subsystem: $subsystem" }
++          if (-not ([Text.Encoding]::ASCII.GetString($b)).Contains('1.0.0+camera')) {
++            throw 'Camera build version is not embedded in the executable'
++          }
++          foreach ($f in @('build-cmake/SDL2.dll',
++                           'build-cmake/dxcompiler.dll',
++                           'build-cmake/dxil.dll',
++                           'build-cmake/assets/recomp.rcss',
++                           'camera.ini')) {
++            if (-not (Test-Path $f)) { throw "Missing file: $f" }
++          }
++          Write-Host 'Windows PE x64 GUI executable and runtime files present'
++
++      - name: Package Windows build
++        shell: pwsh
++        run: |
++          $stage = 'package/BanjoTooieRecompiled'
++          New-Item -ItemType Directory -Force -Path $stage | Out-Null
++          Copy-Item 'build-cmake/BanjoTooieRecompiled.exe' $stage
++          Copy-Item @('build-cmake/SDL2.dll',
++                      'build-cmake/dxcompiler.dll',
++                      'build-cmake/dxil.dll') $stage
++          Copy-Item -Recurse 'build-cmake/assets' "$stage/assets"
++          Copy-Item @('camera.ini', 'CAMERA_PATCH.md', 'README.md', 'COPYING') $stage
++          Compress-Archive -Path "$stage/*" -DestinationPath 'package/BanjoTooieRecompiled-camera-windows-x64.zip' -Force
++          Get-FileHash "$stage/BanjoTooieRecompiled.exe" -Algorithm SHA256 | Format-List
++
++      - name: Upload ZIP
++        uses: actions/upload-artifact@v4
++        with:
++          name: BanjoTooieRecompiled-camera-windows-x64
++          path: package/BanjoTooieRecompiled-camera-windows-x64.zip
++          retention-days: 3
++          if-no-files-found: error
+diff --git a/CAMERA_PATCH.md b/CAMERA_PATCH.md
+new file mode 100644
+index 0000000..6f0bf3c
+--- /dev/null
++++ b/CAMERA_PATCH.md
+@@ -0,0 +1,91 @@
++# Experimental camera-only controls for Banjo-Tooie: Recompiled
++
++This patch targets Vidanox/BanjoTooieRecompiled, commit
++`9e5852541ba1436417e2c4468960e8c6de6deda5`.
++
++The port's original controller bindings are unchanged. In particular, C-left
++and C-right keep their normal meanings while aiming eggs in first person and
++using contextual actions.
++
++## Configure
++
++Edit `camera.ini` next to the executable (the working directory used for
++`assets/`) and restart the game:
++
++```ini
++invert_horizontal = true
++rotation_speed = 2.5
++```
++
++* `invert_horizontal`: `true` or `false` (original = `false`).
++* `rotation_speed`: a number between `1.0` and `4.0` (original = `1.0`).
++* Removing `camera.ini` restores original behavior for both settings.
++* **Restore normal right-stick/C-button mappings in the game's controller
++  settings.** This is required to avoid reversing first-person aiming twice.
++
++This patch does not add a graphical settings menu. Settings load once per
++process; edit the file while the game is closed.
++
++## Scope of the change
++
++The game input dispatcher at `func_800A4878` calls
++`bainput_should_rotate_camera_left/right` (functions `func_80097B70` and
++`func_80097B94`). Its manual camera requests are forwarded to
++`func_80110EFC` with action values 0 (left) and 1 (right).
++
++`func_80110EFC` calls `func_80110E00`, which passes **-45.0f or +45.0f**
++to `func_801111D0`. Two specific additions to the generated C in
++`RecompiledFuncs/funcs_37.c` optionally flip the sign of these target-angle
++deltas. They do not swap C-buttons or alter first-person input.
++
++`func_801111D0` passes **45.0f** as the turn-rate parameter to
++`func_80112D90`. Another specific addition scales this parameter by the
++requested multiplier. `func_80112D90` divides the angular difference by
++this value to set its transition duration; larger values should yield faster
++transitions while preserving the original +/-45-degree target turns.
++
++Caller search in the supplied generated C found that `func_801111D0` is
++called only twice, both from `func_80110E00`'s manual left/right branches.
++Thus this change is scoped to manual third-person yaw, rather than scripted
++cameras or movement.
++
++These modifications are in *committed generated C*. Regenerating
++`RecompiledFuncs/` from a ROM and TOML will overwrite them. If the source is
++regenerated later, reapply the generated-C hunks.
++
++## Build from the public fork
++
++A separate workflow `.github/workflows/camera-windows.yml` performs only the
++Windows x64 build and uploads a ZIP artifact. It runs on pushes to a branch
++called **`camera-controls`**; it does not publish a release. Keep the branch
++separate from `main` so the upstream `build.yml` workflow does not run its
++Windows/Linux/Flatpak/release jobs.
++
++Example PowerShell commands from your existing local clone, assuming `main`
++is at the target commit and your working tree has no unrelated modifications:
++
++```powershell
++git switch -c camera-controls
++git apply .\BanjoTooie-camera-controls.patch
++git add .
++git commit -m "Add configurable camera-only inversion and faster yaw"
++git push -u origin camera-controls
++```
++
++Then open your fork's **Actions** tab -> **Camera controls - Windows x64** ->
++the push run -> **Artifacts** -> `BanjoTooieRecompiled-camera-windows-x64`.
++The ZIP contains the Windows executable, runtime DLLs, assets, and `camera.ini`.
++
++## Verification and limitations
++
++* The code changes and standalone camera-option helpers have been examined;
++  they still require a Windows build and gameplay verification.
++* This environment does not contain the four required Git submodules, so a
++  complete Windows build cannot be validated locally.
++* Without running the game, we cannot guarantee the sign convention, actual
++  perceived speed increase, or compatibility with every camera mode.
++* If the manual camera stops rotating correctly, first try
++  `rotation_speed = 1.0` and `invert_horizontal = false`; this is an
++  experimental patch, **not a tested binary**.
++* Gameplay mechanics, scripted cameras, global controller bindings and
++  first-person aim have no direct source changes in this patch.
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c33980e..20f8b38 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -106,6 +106,7 @@ add_executable(BanjoTooieRecompiled)
+ set(SOURCES
+     ${CMAKE_SOURCE_DIR}/src/main.cpp
+     ${CMAKE_SOURCE_DIR}/src/recomp_api.cpp
++    ${CMAKE_SOURCE_DIR}/src/camera_options.cpp
+     ${CMAKE_SOURCE_DIR}/src/register_overlays.cpp
+     ${CMAKE_SOURCE_DIR}/src/rom_decompression.cpp
+     ${CMAKE_SOURCE_DIR}/rsp/n_aspMain.cpp
+diff --git a/RecompiledFuncs/funcs_37.c b/RecompiledFuncs/funcs_37.c
+index fc94882..a91bb91 100644
+--- a/RecompiledFuncs/funcs_37.c
++++ b/RecompiledFuncs/funcs_37.c
+@@ -19681,6 +19681,8 @@ L_80110EC8:
+     // 0x80110EC8: jal         0x801111D0
+     // 0x80110ECC: lui         $a1, 0xC234
+     ctx->r5 = S32(0XC234 << 16);
++    // Optional camera-only inversion; never alter the C-button inputs.
++    ctx->r5 = (int32_t)tooie_camera_manual_yaw_bits((uint32_t)ctx->r5);
+     func_801111D0(rdram, ctx);
+         goto after_7;
+     // 0x80110ECC: lui         $a1, 0xC234
+@@ -19696,6 +19698,8 @@ L_80110ED8:
+     // 0x80110ED8: jal         0x801111D0
+     // 0x80110EDC: lui         $a1, 0x4234
+     ctx->r5 = S32(0X4234 << 16);
++    // Optional camera-only inversion; never alter the C-button inputs.
++    ctx->r5 = (int32_t)tooie_camera_manual_yaw_bits((uint32_t)ctx->r5);
+     func_801111D0(rdram, ctx);
+         goto after_8;
+     // 0x80110EDC: lui         $a1, 0x4234
+@@ -20408,7 +20412,8 @@ L_80111284:
+     // 0x8011128C: lw          $a1, 0x2C($sp)
+     ctx->r5 = MEM_W(ctx->r29, 0X2C);
+     // 0x80111290: lui         $a2, 0x4234
+-    ctx->r6 = S32(0X4234 << 16);
++    // Optional manual yaw rotation-rate multiplier (original = 45.0f).
++    ctx->r6 = (int32_t)tooie_camera_manual_speed_bits();
+     // 0x80111294: jal         0x80112D90
+     // 0x80111298: addiu       $a3, $zero, 0x1
+     ctx->r7 = ADD32(0, 0X1);
+diff --git a/camera.ini b/camera.ini
+new file mode 100644
+index 0000000..5a487b1
+--- /dev/null
++++ b/camera.ini
+@@ -0,0 +1,5 @@
++# Optional Banjo-Tooie camera adjustments (restart the game after editing).
++# Leave all C-button/controller bindings at their original values.
++# Original behavior: invert_horizontal = false, rotation_speed = 1.0
++invert_horizontal = true
++rotation_speed = 2.5
+diff --git a/include/tooie_camera_options.h b/include/tooie_camera_options.h
+new file mode 100644
+index 0000000..9d24a5d
+--- /dev/null
++++ b/include/tooie_camera_options.h
+@@ -0,0 +1,19 @@
++#ifndef TOOIE_CAMERA_OPTIONS_H
++#define TOOIE_CAMERA_OPTIONS_H
++
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++// Accept/return the original MIPS float bit pattern; used only by the
++// third-person manual yaw path, never by the controller-input layer.
++uint32_t tooie_camera_manual_yaw_bits(uint32_t original_bits);
++uint32_t tooie_camera_manual_speed_bits(void);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif // TOOIE_CAMERA_OPTIONS_H
+diff --git a/include/tooie_recomp.h b/include/tooie_recomp.h
+index fa73a81..1ddbe08 100644
+--- a/include/tooie_recomp.h
++++ b/include/tooie_recomp.h
+@@ -8,6 +8,7 @@
+ #include <stdint.h>
+ 
+ #include "recomp.h"
++#include "tooie_camera_options.h"
+ 
+ #ifdef __cplusplus
+ extern "C" {
+diff --git a/src/camera_options.cpp b/src/camera_options.cpp
+new file mode 100644
+index 0000000..d8edea3
+--- /dev/null
++++ b/src/camera_options.cpp
+@@ -0,0 +1,87 @@
++// Optional third-person camera adjustments. This intentionally does not change
++// C-button state: the calls below come only from the game's manual camera turn
++// routine (see CAMERA_PATCH.md for the verified call chain).
++#include "tooie_camera_options.h"
++
++#include <algorithm>
++#include <cctype>
++#include <cmath>
++#include <cstdint>
++#include <cstring>
++#include <cstdlib>
++#include <fstream>
++#include <string>
++
++namespace {
++struct CameraOptions {
++    bool invert_horizontal = false;
++    float rotation_speed = 1.0f;
++};
++
++std::string trim(std::string text) {
++    const auto start = text.find_first_not_of(" \t\r\n");
++    if (start == std::string::npos) return {};
++    const auto end = text.find_last_not_of(" \t\r\n");
++    return text.substr(start, end - start + 1);
++}
++
++std::string lowercase(std::string text) {
++    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {
++        return static_cast<char>(std::tolower(c));
++    });
++    return text;
++}
++
++CameraOptions read_options() {
++    CameraOptions options;
++    std::ifstream file("camera.ini"); // Same working directory as assets/.
++    std::string line;
++    while (std::getline(file, line)) {
++        const auto comment = line.find_first_of("#;");
++        if (comment != std::string::npos) line.resize(comment);
++        const auto eq = line.find('=');
++        if (eq == std::string::npos) continue;
++        const std::string key = lowercase(trim(line.substr(0, eq)));
++        const std::string value = lowercase(trim(line.substr(eq + 1)));
++        if (key == "invert_horizontal") {
++            if (value == "true" || value == "on" || value == "yes" || value == "1") {
++                options.invert_horizontal = true;
++            } else if (value == "false" || value == "off" || value == "no" || value == "0") {
++                options.invert_horizontal = false;
++            }
++        } else if (key == "rotation_speed") {
++            char* end = nullptr;
++            const float parsed = std::strtof(value.c_str(), &end);
++            if (end != value.c_str() && *end == '\0' && std::isfinite(parsed) &&
++                parsed >= 1.0f && parsed <= 4.0f) {
++                options.rotation_speed = parsed;
++            }
++        }
++    }
++    return options;
++}
++
++const CameraOptions& options() {
++    // Thread-safe lazy load; settings are applied on next launch, not per frame.
++    static const CameraOptions value = read_options();
++    return value;
++}
++} // namespace
++
++extern "C" uint32_t tooie_camera_manual_yaw_bits(uint32_t original_bits) {
++    // Only the two manual-turn branches pass through here (+/- 45 degrees).
++    return options().invert_horizontal ? (original_bits ^ 0x80000000u) : original_bits;
++}
++
++extern "C" uint32_t tooie_camera_manual_speed_bits(void) {
++    // Original camera transition is given 45.0f as its rotation-rate limit.
++    // Increasing this denominator shortens the interpolation time without
++    // changing the +/-45 degree target angle or frame-rate-dependent logic.
++    const float speed = options().rotation_speed;
++    if (speed == 1.0f) return 0x42340000u; // exact original 45.0f bits
++    const float scaled = 45.0f * speed;
++    uint32_t bits = 0;
++    static_assert(sizeof bits == sizeof scaled);
++    std::memcpy(&bits, &scaled, sizeof bits);
++    return bits;
++}

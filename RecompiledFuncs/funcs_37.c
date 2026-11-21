@@ -19681,6 +19681,8 @@ L_80110EC8:
     // 0x80110EC8: jal         0x801111D0
     // 0x80110ECC: lui         $a1, 0xC234
     ctx->r5 = S32(0XC234 << 16);
+    // Optional camera-only inversion; never alter the C-button inputs.
+    ctx->r5 = (int32_t)tooie_camera_manual_yaw_bits((uint32_t)ctx->r5);
     func_801111D0(rdram, ctx);
         goto after_7;
     // 0x80110ECC: lui         $a1, 0xC234
@@ -19696,6 +19698,8 @@ L_80110ED8:
     // 0x80110ED8: jal         0x801111D0
     // 0x80110EDC: lui         $a1, 0x4234
     ctx->r5 = S32(0X4234 << 16);
+    // Optional camera-only inversion; never alter the C-button inputs.
+    ctx->r5 = (int32_t)tooie_camera_manual_yaw_bits((uint32_t)ctx->r5);
     func_801111D0(rdram, ctx);
         goto after_8;
     // 0x80110EDC: lui         $a1, 0x4234
@@ -20408,7 +20412,8 @@ L_80111284:
     // 0x8011128C: lw          $a1, 0x2C($sp)
     ctx->r5 = MEM_W(ctx->r29, 0X2C);
     // 0x80111290: lui         $a2, 0x4234
-    ctx->r6 = S32(0X4234 << 16);
+    // Optional manual yaw rotation-rate multiplier (original = 45.0f).
+    ctx->r6 = (int32_t)tooie_camera_manual_speed_bits();
     // 0x80111294: jal         0x80112D90
     // 0x80111298: addiu       $a3, $zero, 0x1
     ctx->r7 = ADD32(0, 0X1);
