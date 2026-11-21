@@ -56,6 +56,7 @@
 #include "register_overlays.hpp"
 #include "rom_decompression.hpp"
 #include "tooie_visibility.hpp"
+#include "tooie_camera_settings.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -367,9 +368,11 @@ void initialize_config() {
     recompui::config::create_general_tab(general_options);
     recompui::config::create_graphics_tab();
     recompui::config::create_controls_tab();
+    tooie::camera::register_config_tab();
     recompui::config::create_sound_tab();
     recompui::config::create_mods_tab();
     recompui::config::finalize();
+    tooie::camera::apply_loaded_config();
 }
 
 // The launcher wallpaper.

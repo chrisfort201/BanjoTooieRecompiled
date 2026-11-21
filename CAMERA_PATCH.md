@@ -9,8 +9,8 @@ It targets the USA v1.0 ROM and builds on the fork's native-hook implementation
 
 - `banjotooie.us.toml` defines ten native `[[patches.hook]]` entries.
 - `src/camera_options.cpp` implements camera inversion, transition scoping,
-  and the actual motion parameters; `src/camera_diagnostics.cpp` logs optional
-  measurements.
+  and the actual motion parameters; `src/camera_config.cpp` registers live UI
+  settings and `src/camera_diagnostics.cpp` logs optional measurements.
 - `RecompiledFuncs/funcs_37.c` and `funcs_38.c` are generated build artifacts,
   produced from that TOML file by Vidanox's patched N64Recomp.
 - `py tools/tests/test_camera_hooks.py` checks every hook's address, text and
@@ -60,31 +60,48 @@ the active camera/state/target still match the accepted manual transition.
 Other transition types, overwritten transitions and unrelated camera pointers
 use the original parameters. No memory fields are patched in place.
 
-## Configuration
+## Live configuration (frontend)
 
-Put `camera.ini` in the game's working directory (normally alongside the
-executable and `assets/`). The settings load once per process:
+Open the game's **Settings > Camera** tab. All three options can be changed
+while the game is running, without restarting:
 
-```ini
-invert_horizontal = true
-rotation_speed = 2.5
-debug_trace = false
-```
+- **Invert horizontal camera** — reverses the original C-left/C-right manual
+  third-person turn requests, without remapping the first-person C-buttons.
+- **Manual camera rotation speed** — 1.00x (original) to 4.00x, in 0.25x steps.
+  Newly issued manual turns use the selected multiplier; switching settings
+  invalidates old tagged camera transitions rather than changing scripted ones.
+- **Camera diagnostic trace** — enables the bounded `camera-debug.csv` logger.
+  Keep this off during ordinary gameplay.
 
-`rotation_speed` accepts 1.0–4.0. Setting speed to 1.0 and inversion to false
-preserves original camera parameters. The game still uses discrete 45-degree
-manual yaw targets; this does **not** add unrestricted camera orbit or pitch.
+RecompFrontend persists these settings as `camera.json` in its existing
+application config directory, together with the game's other JSON settings.
+There is no restart and no need to edit an INI file. **On first launch only**, if
+there is a legacy `camera.ini` in the working directory and no saved camera
+configuration, its values become the initial UI defaults. Subsequent launches
+use `camera.json` and ignore changes to `camera.ini`. The new Windows package
+does not contain `camera.ini`. A fresh installation defaults to the original
+camera behavior (inversion off, speed 1.00x, diagnostics off).
 
-For verification set `debug_trace = true` and compare 1.0 versus 4.0 with
-separate launches. The append-only `camera-debug.csv` distinguishes sessions
-with `# camera-transition trace session` and now also records the configured
-multiplier (`# configured rotation_speed=...`). When the speed hooks activate,
-`# applied manual motion: ...` records their actual velocity/acceleration/
-braking parameters. For an apples-to-apples comparison, use similar manual
-rotations. The CSV's `current` column exposes game-engine yaw per tick.
+### Neutral-settings guarantee
 
-The trace captures at most 80 requests and 100 frames following each request.
-Disable it in normal gameplay.
+With inversion off, 1.00x speed and trace off, the native camera hooks still
+exist and are called by the generated game code, but they do not change any
+guest registers, guest memory or original motion parameters. They also do not
+read guest camera transition state. Disabled hooks return after checking the
+host-side atomic settings or resetting a host-only marker. This preserves the
+original game's numeric camera inputs; it is **not** instruction-for-instruction
+identical to an unmodified build, and whole-game equivalence still needs
+regression testing.
+
+When speed changes, an atomic generation counter is changed along with the
+multiplier. A pending request from an earlier speed setting cannot be reused
+when the player changes 4x -> 1x -> 4x. Each motion-controller update captures
+one multiplier so its velocity and acceleration hooks are consistent.
+
+For diagnostics, compare the CSV `current` values at different speeds. The
+append-only CSV records session boundaries, the chosen multiplier and
+motion-controller constants when they are modified. Tracing is limited to at
+most 80 camera requests and 100 frames following each request per session.
 
 ## Validation status
 
@@ -93,9 +110,13 @@ Disable it in normal gameplay.
 - Static hook consistency: passed.
 - Native helpers: compiled and exercised against synthetic guest camera memory
   at 1x and 4x, including an override request, changed priority and target.
-- Full Windows packaging and actual gameplay at the new speed: **not yet tested**.
+- Live settings and neutral fast path: host-side tests passed; pinned frontend
+  API signatures verified; `TooieCameraSettingsTests` is built and run by CI,
+  but the complete Windows UI build is not yet tested.
+- Actual gameplay at the new speed and with live UI changes: **not yet tested**.
 
 The speed option remains experimental until verified in-game. In particular,
 other camera modes, scripted sequences, transitions at very short targets and
 switching between camera states should be checked before proposing an upstream
-pull request. Diagnostics and the ad-hoc `camera.ini` UI may require polish.
+pull request. The new camera tab and live updates still need an actual Windows
+build and in-game validation.

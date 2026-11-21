@@ -107,6 +107,7 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/main.cpp
     ${CMAKE_SOURCE_DIR}/src/recomp_api.cpp
     ${CMAKE_SOURCE_DIR}/src/camera_options.cpp
+    ${CMAKE_SOURCE_DIR}/src/camera_config.cpp
     ${CMAKE_SOURCE_DIR}/src/camera_diagnostics.cpp
     ${CMAKE_SOURCE_DIR}/src/register_overlays.cpp
     ${CMAKE_SOURCE_DIR}/src/rom_decompression.cpp
@@ -302,6 +303,18 @@ target_link_libraries(BanjoTooieRecompiled PRIVATE
 )
 
 target_sources(BanjoTooieRecompiled PRIVATE ${SOURCES})
+
+# Small host-only test: proves neutral settings leave N64 registers untouched,
+# scaling is isolated to a tagged manual turn, and live changes revoke tags.
+# EXCLUDE_FROM_ALL keeps normal game builds unchanged.
+add_executable(TooieCameraSettingsTests EXCLUDE_FROM_ALL
+    ${CMAKE_SOURCE_DIR}/src/camera_options.cpp
+    ${CMAKE_SOURCE_DIR}/tools/tests/camera_settings_test.cpp
+)
+target_include_directories(TooieCameraSettingsTests PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${N64MODERNRUNTIME_DIR}/N64Recomp/include
+)
 
 # The version the executable reports. The release workflow sets BT_VERSION to
 # the version it is publishing so the launcher's label identifies the build;

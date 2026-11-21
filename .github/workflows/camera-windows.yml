@@ -56,6 +56,12 @@ jobs:
       - name: Build
         run: cmd /c build_bt.bat
 
+      - name: Verify native camera hooks
+        run: python tools/tests/test_camera_hooks.py
+
+      - name: Test neutral camera behavior and live speed changes
+        run: cmd /c "build_bt.bat TooieCameraSettingsTests && build-cmake\TooieCameraSettingsTests.exe"
+
       - name: Verify executable and package inputs
         shell: pwsh
         run: |
@@ -73,8 +79,7 @@ jobs:
           foreach ($f in @('build-cmake/SDL2.dll',
                            'build-cmake/dxcompiler.dll',
                            'build-cmake/dxil.dll',
-                           'build-cmake/assets/recomp.rcss',
-                           'camera.ini')) {
+                           'build-cmake/assets/recomp.rcss')) {
             if (-not (Test-Path $f)) { throw "Missing file: $f" }
           }
           Write-Host 'Windows PE x64 GUI executable and runtime files present'
@@ -89,7 +94,7 @@ jobs:
                       'build-cmake/dxcompiler.dll',
                       'build-cmake/dxil.dll') $stage
           Copy-Item -Recurse 'build-cmake/assets' "$stage/assets"
-          Copy-Item @('camera.ini', 'CAMERA_PATCH.md', 'README.md', 'COPYING') $stage
+          Copy-Item @('CAMERA_PATCH.md', 'README.md', 'COPYING') $stage
           Compress-Archive -Path "$stage/*" -DestinationPath 'package/BanjoTooieRecompiled-camera-windows-x64.zip' -Force
           Get-FileHash "$stage/BanjoTooieRecompiled.exe" -Algorithm SHA256 | Format-List
 

@@ -2,8 +2,11 @@
 // C-button state: the calls below come only from the game's manual camera turn
 // routine (see CAMERA_PATCH.md for the verified call chain).
 #include "tooie_camera_options.h"
+#include "tooie_camera_settings.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <bit>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -17,6 +20,7 @@ struct CameraOptions {
     bool invert_horizontal = false;
     float rotation_speed = 1.0f;
     bool debug_trace = false;
+    uint32_t speed_generation = 1;
 };
 
 std::string trim(std::string text) {
@@ -35,7 +39,7 @@ std::string lowercase(std::string text) {
 
 CameraOptions read_options() {
     CameraOptions options;
-    std::ifstream file("camera.ini"); // Same working directory as assets/.
+    std::ifstream file("camera.ini"); // Legacy migration only; never polled.
     std::string line;
     while (std::getline(file, line)) {
         const auto comment = line.find_first_of("#;");
@@ -65,16 +69,66 @@ CameraOptions read_options() {
     return options;
 }
 
-const CameraOptions& options() {
-    // Thread-safe lazy load; settings are applied on next launch, not per frame.
-    static const CameraOptions value = read_options();
-    return value;
+// The UI lives on a different thread from the recompiled game. The speed
+// multiplier and its generation are one atomic word, so a live setting change
+// never pairs the new multiplier with a previously tagged transition.
+std::atomic<bool> invert_horizontal{false};
+std::atomic<bool> debug_trace{false};
+constexpr uint64_t default_speed_state = (uint64_t{1} << 32) | uint32_t{0x3F800000};
+std::atomic<uint64_t> speed_state{default_speed_state};
+
+struct SpeedSnapshot {
+    float multiplier;
+    uint32_t generation;
+};
+SpeedSnapshot speed_snapshot() {
+    const uint64_t packed = speed_state.load(std::memory_order_acquire);
+    return {std::bit_cast<float>(static_cast<uint32_t>(packed)),
+            static_cast<uint32_t>(packed >> 32)};
+}
+CameraOptions options() {
+    const SpeedSnapshot speed = speed_snapshot();
+    return {invert_horizontal.load(std::memory_order_relaxed),
+            speed.multiplier,
+            debug_trace.load(std::memory_order_relaxed),
+            speed.generation};
 }
 } // namespace
 
+namespace tooie::camera {
+Settings legacy_ini_defaults() {
+    const CameraOptions from_ini = read_options();
+    return {from_ini.invert_horizontal, from_ini.rotation_speed, from_ini.debug_trace};
+}
+void set_invert_horizontal(bool enabled) {
+    invert_horizontal.store(enabled, std::memory_order_relaxed);
+}
+void set_rotation_speed(float multiplier) {
+    if (!std::isfinite(multiplier) || multiplier < 1.0f || multiplier > 4.0f) return;
+    const uint32_t bits = std::bit_cast<uint32_t>(multiplier);
+    uint64_t previous = speed_state.load(std::memory_order_relaxed);
+    while (static_cast<uint32_t>(previous) != bits) {
+        // A change from 4x -> 1x -> 4x must not revive an old camera tag.
+        const uint64_t next =
+            (static_cast<uint64_t>(static_cast<uint32_t>(previous >> 32) + 1) << 32) | bits;
+        if (speed_state.compare_exchange_weak(previous, next,
+                                              std::memory_order_release,
+                                              std::memory_order_relaxed)) return;
+    }
+}
+void set_debug_trace(bool enabled) {
+    debug_trace.store(enabled, std::memory_order_relaxed);
+}
+Settings snapshot() {
+    const CameraOptions current = options();
+    return {current.invert_horizontal, current.rotation_speed, current.debug_trace};
+}
+} // namespace tooie::camera
+
 extern "C" uint32_t tooie_camera_manual_yaw_bits(uint32_t original_bits) {
-    // Only the two manual-turn branches pass through here (+/- 45 degrees).
-    return options().invert_horizontal ? (original_bits ^ 0x80000000u) : original_bits;
+    // Exact neutral fast path: no writes to guest registers or memory.
+    if (!invert_horizontal.load(std::memory_order_relaxed)) return original_bits;
+    return original_bits ^ 0x80000000u;
 }
 
 namespace {
@@ -87,7 +141,9 @@ struct ManualYawState {
     uint32_t pending_camera = 0;
     uint32_t pending_target_bits = 0;
     bool pending = false;
-    bool in_motion_controller = false;
+    float active_factor = 1.0f;
+    uint32_t generation = 0;
+    uint32_t pending_generation = 0;
 };
 
 thread_local ManualYawState manual_yaw;
@@ -106,8 +162,9 @@ gpr guest_address(uint32_t ptr) {
     return static_cast<gpr>(static_cast<int32_t>(ptr));
 }
 
-bool is_our_transition(uint8_t* rdram, uint32_t camera) {
-    if (!camera || manual_yaw.camera != camera) return false;
+bool is_our_transition(uint8_t* rdram, uint32_t camera, uint32_t generation) {
+    if (!camera || manual_yaw.camera != camera ||
+        manual_yaw.generation != generation) return false;
     const auto state = static_cast<uint32_t>(MEM_W(0x60, guest_address(camera)));
     if (state != manual_yaw.transition || !state) return false;
     const gpr p = guest_address(state);
@@ -122,8 +179,8 @@ bool is_our_transition(uint8_t* rdram, uint32_t camera) {
 // These host-side helpers are invoked by N64Recomp's configured hook points.
 // They must preserve all registers except the specifically modified argument.
 extern "C" void tooie_camera_hook_invert(uint8_t*, recomp_context* ctx) {
-    ctx->r5 = static_cast<int32_t>(tooie_camera_manual_yaw_bits(
-        static_cast<uint32_t>(ctx->r5)));
+    if (!invert_horizontal.load(std::memory_order_relaxed)) return;
+    ctx->r5 = static_cast<int32_t>(static_cast<uint32_t>(ctx->r5) ^ 0x80000000u);
 }
 
 // Implemented in camera_diagnostics.cpp; disabled by default.
@@ -133,23 +190,30 @@ extern "C" void tooie_camera_trace_after(uint8_t*);
 extern "C" void tooie_camera_trace_tick(uint8_t*, uint32_t, int);
 
 extern "C" void tooie_camera_hook_request(uint8_t* rdram, recomp_context* ctx) {
-    // Manual yaw's target is in $a1; leave $a2 at the original 45.0f.
-    // Scaling this parameter was shown to change transition duration but not
-    // the actual 75-degrees/second rate limit in the per-frame controller.
-    manual_yaw.pending_camera = static_cast<uint32_t>(ctx->r4);
-    manual_yaw.pending_target_bits = static_cast<uint32_t>(ctx->r5);
-    manual_yaw.pending = true;
-    if (options().debug_trace) {
-        tooie_camera_trace_before(rdram, manual_yaw.pending_camera,
-                                  manual_yaw.pending_target_bits,
-                                  static_cast<uint32_t>(ctx->r6), options().rotation_speed);
+    // The unmodified path performs no camera state inspection or register writes.
+    const CameraOptions settings = options();
+    if (settings.rotation_speed == 1.0f && !settings.debug_trace) return;
+
+    // The 45-degree request is unmodified; only the downstream controller's
+    // velocity/acceleration constants change for a tagged accepted request.
+    if (settings.rotation_speed > 1.0f) {
+        manual_yaw.pending_camera = static_cast<uint32_t>(ctx->r4);
+        manual_yaw.pending_target_bits = static_cast<uint32_t>(ctx->r5);
+        manual_yaw.pending_generation = settings.speed_generation;
+        manual_yaw.pending = true;
+    } else {
+        manual_yaw.pending = false;
+    }
+    if (settings.debug_trace) {
+        tooie_camera_trace_before(rdram, static_cast<uint32_t>(ctx->r4),
+                                  static_cast<uint32_t>(ctx->r5),
+                                  static_cast<uint32_t>(ctx->r6), settings.rotation_speed);
     }
 }
 
 extern "C" void tooie_camera_hook_transition_setup(uint8_t*, recomp_context* ctx) {
-    // Called at entry to *every* original transition request. A cinematic,
-    // scripted, or other competing request invalidates our manual yaw tag;
-    // the manual caller sets it anew only after its request is accepted.
+    if (speed_snapshot().multiplier == 1.0f) return;
+    // Any competing original transition replaces the tagged manual request.
     if (manual_yaw.camera == static_cast<uint32_t>(ctx->r4)) {
         manual_yaw.camera = 0;
         manual_yaw.transition = 0;
@@ -158,69 +222,72 @@ extern "C" void tooie_camera_hook_transition_setup(uint8_t*, recomp_context* ctx
 }
 
 extern "C" void tooie_camera_hook_request_complete(uint8_t* rdram, recomp_context*) {
+    // Do not read guest camera memory unless a modified manual yaw was issued.
     if (manual_yaw.pending) {
-        const uint32_t camera = manual_yaw.pending_camera;
-        if (camera) {
-            const auto state = static_cast<uint32_t>(MEM_W(0x60, guest_address(camera)));
-            if (state) {
-                const gpr p = guest_address(state);
-                if (static_cast<int16_t>(MEM_H(0xC, p)) == 1 &&
-                    static_cast<int16_t>(MEM_H(0xE, p)) == 2 &&
-                    static_cast<uint32_t>(MEM_W(0x10, p)) == manual_yaw.pending_target_bits) {
-                    manual_yaw.camera = camera;
-                    manual_yaw.transition = state;
-                    manual_yaw.target_bits = manual_yaw.pending_target_bits;
+        const SpeedSnapshot speed = speed_snapshot();
+        if (speed.multiplier > 1.0f &&
+            manual_yaw.pending_generation == speed.generation) {
+            const uint32_t camera = manual_yaw.pending_camera;
+            if (camera) {
+                const auto state = static_cast<uint32_t>(MEM_W(0x60, guest_address(camera)));
+                if (state) {
+                    const gpr p = guest_address(state);
+                    if (static_cast<int16_t>(MEM_H(0xC, p)) == 1 &&
+                        static_cast<int16_t>(MEM_H(0xE, p)) == 2 &&
+                        static_cast<uint32_t>(MEM_W(0x10, p)) == manual_yaw.pending_target_bits) {
+                        manual_yaw.camera = camera;
+                        manual_yaw.transition = state;
+                        manual_yaw.target_bits = manual_yaw.pending_target_bits;
+                        manual_yaw.generation = speed.generation;
+                    }
                 }
             }
         }
         manual_yaw.pending = false;
     }
-    if (options().debug_trace) tooie_camera_trace_after(rdram);
+    if (debug_trace.load(std::memory_order_relaxed)) tooie_camera_trace_after(rdram);
 }
 
 extern "C" void tooie_camera_hook_motion_enter(uint8_t* rdram, recomp_context* ctx) {
-    // $s0 is the camera in func_80112A84. This hook is immediately before
-    // the only call to func_801127C8; it does not affect other controller users.
-    manual_yaw.in_motion_controller =
-        options().rotation_speed > 1.0f &&
-        is_our_transition(rdram, static_cast<uint32_t>(ctx->r16));
-}
-
-extern "C" void tooie_camera_hook_motion_leave(uint8_t*, recomp_context*) {
-    manual_yaw.in_motion_controller = false;
-}
-
-extern "C" void tooie_camera_hook_motion_speed(uint8_t*, recomp_context* ctx) {
-    // 0x80112824 loaded the original 75.0f into $f6. The engine passes
-    // this as the maximum angular velocity to func_800FF060.
-    if (manual_yaw.in_motion_controller) {
-        ctx->f6.u32l = scale_float_bits(ctx->f6.u32l, options().rotation_speed);
+    manual_yaw.active_factor = 1.0f;
+    const SpeedSnapshot speed = speed_snapshot();
+    if (speed.multiplier <= 1.0f) return; // No guest reads in neutral mode.
+    // Capture one multiplier for both speed and acceleration in this update.
+    if (is_our_transition(rdram, static_cast<uint32_t>(ctx->r16), speed.generation)) {
+        manual_yaw.active_factor = speed.multiplier;
     }
 }
 
+extern "C" void tooie_camera_hook_motion_leave(uint8_t*, recomp_context*) {
+    manual_yaw.active_factor = 1.0f;
+}
+
+extern "C" void tooie_camera_hook_motion_speed(uint8_t*, recomp_context* ctx) {
+    const float factor = manual_yaw.active_factor;
+    if (factor == 1.0f) return;
+    ctx->f6.u32l = scale_float_bits(ctx->f6.u32l, factor);
+}
+
 extern "C" void tooie_camera_hook_motion_acceleration(uint8_t*, recomp_context* ctx) {
-    // Original $a2/$a3 constants: +1000.0f acceleration, -560.0f braking.
-    // Scaling both alongside max speed preserves their relative tuning.
-    if (manual_yaw.in_motion_controller) {
-        const float factor = options().rotation_speed;
-        ctx->r6 = static_cast<int32_t>(scale_float_bits(static_cast<uint32_t>(ctx->r6), factor));
-        ctx->r7 = static_cast<int32_t>(scale_float_bits(static_cast<uint32_t>(ctx->r7), factor));
-        if (options().debug_trace) {
-            uint32_t velocity_bits = ctx->f6.u32l;
-            float max_velocity;
-            std::memcpy(&max_velocity, &velocity_bits, sizeof max_velocity);
-            uint32_t accel_bits = static_cast<uint32_t>(ctx->r6);
-            uint32_t brake_bits = static_cast<uint32_t>(ctx->r7);
-            float acceleration, braking;
-            std::memcpy(&acceleration, &accel_bits, sizeof acceleration);
-            std::memcpy(&braking, &brake_bits, sizeof braking);
-            tooie_camera_trace_motion_parameters(factor, max_velocity, acceleration, braking);
-        }
+    const float factor = manual_yaw.active_factor;
+    if (factor == 1.0f) return;
+    ctx->r6 = static_cast<int32_t>(scale_float_bits(static_cast<uint32_t>(ctx->r6), factor));
+    ctx->r7 = static_cast<int32_t>(scale_float_bits(static_cast<uint32_t>(ctx->r7), factor));
+    if (debug_trace.load(std::memory_order_relaxed)) {
+        const uint32_t velocity_bits = ctx->f6.u32l;
+        float max_velocity;
+        std::memcpy(&max_velocity, &velocity_bits, sizeof max_velocity);
+        const uint32_t accel_bits = static_cast<uint32_t>(ctx->r6);
+        const uint32_t brake_bits = static_cast<uint32_t>(ctx->r7);
+        float acceleration, braking;
+        std::memcpy(&acceleration, &accel_bits, sizeof acceleration);
+        std::memcpy(&braking, &brake_bits, sizeof braking);
+        tooie_camera_trace_motion_parameters(factor, max_velocity, acceleration, braking);
     }
 }
 
 extern "C" void tooie_camera_hook_tick(uint8_t* rdram, recomp_context* ctx, int after) {
-    if (options().debug_trace) {
+    if (debug_trace.load(std::memory_order_relaxed)) {
         tooie_camera_trace_tick(rdram, static_cast<uint32_t>(ctx->r16), after);
     }
 }
