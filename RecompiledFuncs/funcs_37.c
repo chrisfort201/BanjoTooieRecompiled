@@ -20410,7 +20410,7 @@ L_80111284:
     ctx->r5 = MEM_W(ctx->r29, 0X2C);
     // 0x80111290: lui         $a2, 0x4234
     ctx->r6 = S32(0X4234 << 16);
-    tooie_camera_hook_rate(rdram, ctx);
+    tooie_camera_hook_request(rdram, ctx);
     // 0x80111294: jal         0x80112D90
     // 0x80111298: addiu       $a3, $zero, 0x1
     ctx->r7 = ADD32(0, 0X1);
@@ -20419,7 +20419,7 @@ L_80111284:
     // 0x80111298: addiu       $a3, $zero, 0x1
     ctx->r7 = ADD32(0, 0X1);
     after_9:
-    tooie_camera_hook_rate_complete(rdram, ctx);
+    tooie_camera_hook_request_complete(rdram, ctx);
     // 0x8011129C: addiu       $v0, $zero, 0x1
     ctx->r2 = ADD32(0, 0X1);
 L_801112A0:
@@ -24702,6 +24702,7 @@ RECOMP_FUNC void func_801127C8(uint8_t* rdram, recomp_context* ctx) {
     ctx->r1 = S32(0X4296 << 16);
     // 0x80112824: mtc1        $at, $f6
     ctx->f6.u32l = ctx->r1;
+    tooie_camera_hook_motion_speed(rdram, ctx);
     // 0x80112828: lwc1        $f12, 0x2C($sp)
     ctx->f12.u32l = MEM_W(ctx->r29, 0X2C);
     // 0x8011282C: lw          $a1, 0x38($sp)
@@ -24710,6 +24711,7 @@ RECOMP_FUNC void func_801127C8(uint8_t* rdram, recomp_context* ctx) {
     ctx->r6 = S32(0X447A << 16);
     // 0x80112834: lui         $a3, 0xC40C
     ctx->r7 = S32(0XC40C << 16);
+    tooie_camera_hook_motion_acceleration(rdram, ctx);
     // 0x80112838: swc1        $f0, 0x14($sp)
     MEM_W(0X14, ctx->r29) = ctx->f0.u32l;
     // 0x8011283C: jal         0x800FF060

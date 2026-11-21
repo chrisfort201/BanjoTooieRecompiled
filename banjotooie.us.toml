@@ -551,30 +551,56 @@ func = "func_800DE498"
 before_vram = 0x800DE6E0
 text = "tooie_expand_pickup_radius(rdram, ctx);"
 
-# Manual third-person yaw. These hooks are the source of truth for camera
-# enhancements; RecompiledFuncs/ holds the checked-in generated equivalent.
-# func_801111D0 has only two direct callers, the left/right branches of
-# func_80110E00, so input inversion cannot change first-person C-button aim.
+# Manual third-person yaw; no C-button remapping, including in first person.
+# The request/complete pair tags *accepted* manual transitions. Any subsequent
+# transition request for the same camera invalidates the tag, so cinematics
+# retain their original camera motion.
 [[patches.hook]]
 func = "func_801111D0"
 before_vram = 0x801111D0
 text = "tooie_camera_hook_invert(rdram, ctx);"
 
-# After the original MIPS 'lui $a2, 0x4234' sets 45.0f, before the
-# transition request. No controller input or scripted cameras are changed.
 [[patches.hook]]
 func = "func_801111D0"
 before_vram = 0x80111294
-text = "tooie_camera_hook_rate(rdram, ctx);"
+text = "tooie_camera_hook_request(rdram, ctx);"
 
-# Optional tracing of whether the original transition routine accepted the
-# requested change. The helper is a no-op unless debug_trace is enabled.
 [[patches.hook]]
 func = "func_801111D0"
 before_vram = 0x8011129C
-text = "tooie_camera_hook_rate_complete(rdram, ctx);"
+text = "tooie_camera_hook_request_complete(rdram, ctx);"
 
-# Original per-frame transition update, observed without changing the engine.
+[[patches.hook]]
+func = "func_80112D90"
+before_vram = 0x80112D90
+text = "tooie_camera_hook_transition_setup(rdram, ctx);"
+
+# func_80112A84 uses type-1 smoothing for manual yaw. Bracket its sole call
+# to func_801127C8; on other camera modes the hooks do not modify anything.
+[[patches.hook]]
+func = "func_80112A84"
+before_vram = 0x80112B90
+text = "tooie_camera_hook_motion_enter(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80112A84"
+before_vram = 0x80112B98
+text = "tooie_camera_hook_motion_leave(rdram, ctx);"
+
+# Actual per-frame motion controller: 75 deg/s velocity ceiling, 1000 deg/s^2
+# acceleration and -560 deg/s^2 braking. These are changed only inside the
+# explicitly bracketed, accepted manual-yaw transition.
+[[patches.hook]]
+func = "func_801127C8"
+before_vram = 0x80112828
+text = "tooie_camera_hook_motion_speed(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_801127C8"
+before_vram = 0x80112838
+text = "tooie_camera_hook_motion_acceleration(rdram, ctx);"
+
+# Original per-frame update trace; both hooks are passive when disabled.
 [[patches.hook]]
 func = "func_80112A84"
 before_vram = 0x80112A98

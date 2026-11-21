@@ -565,6 +565,7 @@ L_80112B54:
     ctx->r6 = ADD32(ctx->r2, 0X18);
     // 0x80112B8C: lui         $a3, 0x4248
     ctx->r7 = S32(0X4248 << 16);
+    tooie_camera_hook_motion_enter(rdram, ctx);
     // 0x80112B90: jal         0x801127C8
     // 0x80112B94: swc1        $f10, 0x10($sp)
     MEM_W(0X10, ctx->r29) = ctx->f10.u32l;
@@ -573,6 +574,7 @@ L_80112B54:
     // 0x80112B94: swc1        $f10, 0x10($sp)
     MEM_W(0X10, ctx->r29) = ctx->f10.u32l;
     after_6:
+    tooie_camera_hook_motion_leave(rdram, ctx);
     // 0x80112B98: mtc1        $zero, $f0
     ctx->f0.u32l = 0;
     // 0x80112B9C: or          $a0, $s0, $zero
@@ -958,6 +960,7 @@ RECOMP_FUNC void func_80112D2C(uint8_t* rdram, recomp_context* ctx) {
 RECOMP_FUNC void func_80112D90(uint8_t* rdram, recomp_context* ctx) {
     uint64_t hi = 0, lo = 0, result = 0;
     int c1cs = 0;
+    tooie_camera_hook_transition_setup(rdram, ctx);
     // 0x80112D90: addiu       $sp, $sp, -0x20
     ctx->r29 = ADD32(ctx->r29, -0X20);
     // 0x80112D94: sw          $ra, 0x1C($sp)

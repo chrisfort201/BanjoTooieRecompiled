@@ -1,46 +1,69 @@
-# Third-person manual camera controls — native hook implementation
+# Third-person camera inversion and manual rotation speed
 
-This feature starts from Vidanox/BanjoTooieRecompiled at
-`9e5852541ba1436417e2c4468960e8c6de6deda5`. The fork's `camera-controls`
-branch currently has the original experimental camera implementation and a
-Windows-only workflow. This revision **moves the behavior to N64Recomp's native
-hook configuration**; it is not a new input remapping layer.
+This experimental feature modifies original camera behavior using N64Recomp's
+instruction hooks rather than controller remapping or hand-maintained generated C.
+It targets the USA v1.0 ROM and builds on the fork's native-hook implementation
+(commit `7079aff` on `camera-controls`).
 
-## Authoritative source and generated counterpart
+## Source of truth and reproducibility
 
-- `banjotooie.us.toml` contains five `[[patches.hook]]` entries targeting the
-  original game's **instruction addresses**.
-- `src/camera_options.cpp` implements inversion and the speed option in host
-  C++. `src/camera_diagnostics.cpp` implements optional, passive logging.
-- `RecompiledFuncs/funcs_37.c` and `funcs_38.c` contain the **committed generated
-  C counterpart** of those TOML hooks. Vidanox's repository commits generated
-  functions so normal builds do not require a ROM or a working recompiler.
-  These generated copies are build artifacts, **not feature source**.
-- `tools/tests/test_camera_hooks.py` verifies that the TOML hook declarations
-  and their committed C counterparts agree at the documented instruction sites.
+- `banjotooie.us.toml` defines ten native `[[patches.hook]]` entries.
+- `src/camera_options.cpp` implements camera inversion, transition scoping,
+  and the actual motion parameters; `src/camera_diagnostics.cpp` logs optional
+  measurements.
+- `RecompiledFuncs/funcs_37.c` and `funcs_38.c` are generated build artifacts,
+  produced from that TOML file by Vidanox's patched N64Recomp.
+- `py tools/tests/test_camera_hooks.py` checks every hook's address, text and
+  position against the committed generated files.
 
-A real re-generation via Vidanox's patched N64Recomp and the correct ROM still
-needs to be checked before upstream submission; that cannot be performed in a
-ROM-free sandbox. Do not hand-edit generated C to change camera behavior.
+The generated files were independently regenerated from the SHA-1-matched
+Banjo-Tooie USA 1.0 ROM with the patched N64Recomp and checked for unrelated
+output differences. The regeneration only altered the expected camera hooks.
 
-## Camera call chain
+## Camera path and findings
 
-`func_800A4878` dispatches manual third-person camera input;
-`func_80110E00` selects -45° or +45° and calls `func_801111D0` (only two
-static callsites in the committed code). The `0x801111D0` hook can therefore
-invert that **manual yaw argument** without changing the actual C-buttons.
+`func_80110E00` requests a manual left/right turn through `func_801111D0`.
+Its two original callsites make it safe to invert the turn angle without
+swapping C-buttons, including their use in first-person egg aiming.
 
-At `0x80111294`, after the game's `lui $a2, 0x4234` sets 45.0f and before
-calling `func_80112D90`, a second hook applies the configured rotation-rate
-multiplier. `func_80112D90` is the transition setup and contains priority
-checks. `func_80112A84` advances the transition per frame. We have **not yet
-verified** that this rate parameter controls perceived camera yaw linearly:
-user testing of the previous implementation found little or no change.
-The new hook organization does not pretend that problem is fixed.
+Previously, `rotation_speed` scaled the original 45.0f parameter passed to
+`func_80112D90`. The runtime trace confirmed this shortened the transition
+*duration* (1.2 s at 1x versus 0.3 s at 4x), but did **not** change the
+per-frame yaw. The trace showed 2.5 degrees per 30 Hz update at both settings.
 
-## Configure / test
+The underlying cause is the distinct per-frame motion controller:
 
-`camera.ini` in the game's working directory (alongside `assets/`):
+- `func_80112A84` handles a type-1 yaw transition, calling `func_801127C8`
+  at the `0x80112B90` instruction.
+- `func_801127C8` uses `func_800FF060` to approach the requested angle, with
+  original float constants 75.0 (angular-velocity limit), 1000.0
+  (acceleration) and -560.0 (braking).
+- At a 30 Hz update, a 75-deg/s cap corresponds to the observed 2.5 degrees
+  per update.
+
+The new speed option leaves the original 45.0f request parameter unchanged.
+Instead, it scales all three motion-controller parameters by `rotation_speed`.
+For example at 4x the limits are 300.0, 4000.0 and -2240.0. At 1x they remain
+exactly the original values.
+
+### Scoping safeguards
+
+The manual request hook records the camera and target. Its completion hook only
+tags a transition after confirming the original game accepted the request
+(type=1, priority=2, exact target and state pointer). Every entry to the
+original transition setup invalidates an earlier manual tag for the same
+camera; only a new, accepted manual request can re-enable it.
+
+The per-frame controller is bracketed by hooks at `0x80112B90` and
+`0x80112B98`. It scales the original limit and acceleration constants only if
+the active camera/state/target still match the accepted manual transition.
+Other transition types, overwritten transitions and unrelated camera pointers
+use the original parameters. No memory fields are patched in place.
+
+## Configuration
+
+Put `camera.ini` in the game's working directory (normally alongside the
+executable and `assets/`). The settings load once per process:
 
 ```ini
 invert_horizontal = true
@@ -48,28 +71,31 @@ rotation_speed = 2.5
 debug_trace = false
 ```
 
-- `invert_horizontal = false`, `rotation_speed = 1.0` restores the original
-  camera parameters. Controller bindings should remain unmodified.
-- `rotation_speed` accepts `1.0` through `4.0`. This is currently an experimental
-  **rate parameter**, not yet a validated multiplier of actual degrees/second.
-- Enable `debug_trace = true` temporarily to append `camera-debug.csv` in the
-  game's working directory. Run at 1.0, then at 4.0, with one short left/right
-  camera turn each. Fully exit between runs. Send both logs for comparison.
-- The trace records the transition request, state before/after setup and up to
-  100 before/after samples from its original per-frame update. It is bounded to
-  80 requests per session. It does not change camera data.
+`rotation_speed` accepts 1.0–4.0. Setting speed to 1.0 and inversion to false
+preserves original camera parameters. The game still uses discrete 45-degree
+manual yaw targets; this does **not** add unrestricted camera orbit or pitch.
 
-The camera is still limited to the game's original manual yaw target/behavior.
-This patch does not implement full right-stick free-look, vertical movement,
-new camera interpolation, or a graphical settings menu.
+For verification set `debug_trace = true` and compare 1.0 versus 4.0 with
+separate launches. The append-only `camera-debug.csv` distinguishes sessions
+with `# camera-transition trace session` and now also records the configured
+multiplier (`# configured rotation_speed=...`). When the speed hooks activate,
+`# applied manual motion: ...` records their actual velocity/acceleration/
+braking parameters. For an apples-to-apples comparison, use similar manual
+rotations. The CSV's `current` column exposes game-engine yaw per tick.
 
-## Build and PR readiness
+The trace captures at most 80 requests and 100 frames following each request.
+Disable it in normal gameplay.
 
-The existing `camera-windows.yml` workflow is unchanged by this revision; it
-already uses `windows-2022`. Push to `camera-controls` to run the Windows build.
+## Validation status
 
-The core architecture is suitable for review because the hooks live in TOML,
-are implemented in dedicated native source, and the committed C mirrors them.
-This is **not yet a finished PR**: the speed behavior requires runtime traces,
-the graphical configuration may merit integration into the existing launcher,
-and the generated output needs an upstream-style regeneration check with ROM.
+- Patch architecture: native TOML hooks, not manual generated-code edits.
+- ROM-based regeneration: passed, with no unrelated generated code differences.
+- Static hook consistency: passed.
+- Native helpers: compiled and exercised against synthetic guest camera memory
+  at 1x and 4x, including an override request, changed priority and target.
+- Full Windows packaging and actual gameplay at the new speed: **not yet tested**.
+
+The speed option remains experimental until verified in-game. In particular,
+other camera modes, scripted sequences, transitions at very short targets and
+switching between camera states should be checked before proposing an upstream
+pull request. Diagnostics and the ad-hoc `camera.ini` UI may require polish.

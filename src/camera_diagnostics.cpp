@@ -20,6 +20,7 @@ struct CameraTrace {
     unsigned requests = 0;
     unsigned sample = 0;
     bool active = false;
+    bool motion_logged = false;
 
     CameraTrace() : file("camera-debug.csv", std::ios::app) {
         if (file) {
@@ -77,11 +78,14 @@ void write_state(CameraTrace& t, uint8_t* rdram, const char* event) {
 
 extern "C" void tooie_camera_trace_before(uint8_t* rdram,
                                             uint32_t camera, uint32_t delta,
-                                            uint32_t rate) {
+                                            uint32_t rate, float multiplier) {
     if (!camera) return;
     auto& t = trace();
     std::lock_guard<std::mutex> guard(t.mutex);
     if (t.requests >= 80 || !t.file) { t.active = false; return; }
+    if (t.requests == 0) {
+        t.file << "# configured rotation_speed=" << multiplier << '\n';
+    }
     ++t.requests;
     t.camera = camera;
     t.delta = delta;
@@ -105,4 +109,19 @@ extern "C" void tooie_camera_trace_tick(uint8_t* rdram,
     if (!t.active || t.camera != camera || t.sample >= 100) return;
     if (!after) ++t.sample;
     write_state(t, rdram, after ? "tick_after" : "tick_before");
+}
+
+// Once per process, expose the *actual* active controller parameters so a
+// missing/mis-scoped hook can be distinguished from an ineffective multiplier.
+extern "C" void tooie_camera_trace_motion_parameters(float multiplier,
+            float max_velocity, float acceleration, float braking) {
+    auto& t = trace();
+    std::lock_guard<std::mutex> guard(t.mutex);
+    if (t.motion_logged || !t.file) return;
+    t.motion_logged = true;
+    t.file << "# applied manual motion: speed=" << multiplier
+           << " max_velocity=" << max_velocity
+           << " acceleration=" << acceleration
+           << " braking=" << braking << '\n';
+    t.file.flush();
 }

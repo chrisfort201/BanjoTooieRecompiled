@@ -10,8 +10,13 @@ config = tomllib.loads((root / "banjotooie.us.toml").read_text())
 hooks = config["patches"]["hook"]
 expected = [
     ("func_801111D0", 0x801111D0, "tooie_camera_hook_invert(rdram, ctx);", "funcs_37.c"),
-    ("func_801111D0", 0x80111294, "tooie_camera_hook_rate(rdram, ctx);", "funcs_37.c"),
-    ("func_801111D0", 0x8011129C, "tooie_camera_hook_rate_complete(rdram, ctx);", "funcs_37.c"),
+    ("func_801111D0", 0x80111294, "tooie_camera_hook_request(rdram, ctx);", "funcs_37.c"),
+    ("func_801111D0", 0x8011129C, "tooie_camera_hook_request_complete(rdram, ctx);", "funcs_37.c"),
+    ("func_80112D90", 0x80112D90, "tooie_camera_hook_transition_setup(rdram, ctx);", "funcs_38.c"),
+    ("func_80112A84", 0x80112B90, "tooie_camera_hook_motion_enter(rdram, ctx);", "funcs_38.c"),
+    ("func_80112A84", 0x80112B98, "tooie_camera_hook_motion_leave(rdram, ctx);", "funcs_38.c"),
+    ("func_801127C8", 0x80112828, "tooie_camera_hook_motion_speed(rdram, ctx);", "funcs_37.c"),
+    ("func_801127C8", 0x80112838, "tooie_camera_hook_motion_acceleration(rdram, ctx);", "funcs_37.c"),
     ("func_80112A84", 0x80112A98, "tooie_camera_hook_tick(rdram, ctx, 0);", "funcs_38.c"),
     ("func_80112A84", 0x80112C28, "tooie_camera_hook_tick(rdram, ctx, 1);", "funcs_38.c"),
 ]
@@ -33,4 +38,4 @@ c = (root / "RecompiledFuncs/funcs_37.c").read_text()
 assert "// Optional camera-only inversion; never alter the C-button inputs." not in c
 assert "// Optional manual yaw rotation-rate multiplier (original = 45.0f)." not in c
 assert c.count("func_801111D0(rdram, ctx);") == 2
-print("PASS: 5 native TOML hooks match committed generated C positions")
+print("PASS: 10 native TOML hooks match generated C positions")
