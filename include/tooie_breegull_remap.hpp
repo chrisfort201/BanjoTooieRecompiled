@@ -14,12 +14,13 @@ struct Pad {
     int8_t stick_y;
 };
 
-// The bsfirstp movement overlay uses 0xD1 during first-person movement;
-// excluding it caused alternating translated and original analog frames.
+// Traces confirm 0xD1 during movement and 0xD8 while firing eggs. The
+// firing animation also retains 0xD8 briefly after the fire button is
+// released, so the state must be accepted independently of button presses.
 // Keep the accepted set narrow: do not absorb unrelated action states.
 inline bool is_blaster_state(uint32_t state) {
     return (state >= 0xC8 && state <= 0xCC) || state == 0xD1 ||
-           (state >= 0xD9 && state <= 0xDC);
+           (state >= 0xD8 && state <= 0xDC);
 }
 
 // Standard libultra OSContPad masks: C-up=0x8, C-down=0x4,

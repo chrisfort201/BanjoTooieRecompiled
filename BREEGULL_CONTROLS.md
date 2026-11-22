@@ -5,7 +5,7 @@ Branch: `modern-breegull-controls` (based on the fork's manual-build main).
 - Optional **Modern Breegull Blaster controls** under a new RecompFrontend
   settings tab, default **off**, live and persisted in `breegull.json`.
 - When enabled **and** the observed first-person player has one of the
-  designated `bsfirstp` states (C8–CC, D1, or D9–DC) **and** a controller is open:
+  designated `bsfirstp` states (C8–CC, D1, or D8–DC) **and** a controller is open:
   left analog X produces original C-left/right strafing; right analog X
   produces original N64 stick-X turning (continuous analog); left analog Y,
   C-up/down pitching, other buttons and the original game camera are unchanged.
@@ -22,9 +22,10 @@ Branch: `modern-breegull-controls` (based on the fork's manual-build main).
   N64 controller packet immediately before `func_8001608C` consumes it. The
   initial producer-side hook after `osContGetReadData` could race the game's
   input-consumption thread, so the remap is now performed at the consumer.
-  Subsequent CSV traces identified a separate, confirmed defect: `0xD1`
-  was incorrectly excluded while the game frequently transitions between
-  `0xCA` and `0xD1` during movement. This revision accepts `0xD1` explicitly.
+  CSV traces identified two state-filter defects: `0xD1` was previously
+  excluded during movement, and `0xD8` is reached while firing eggs (including
+  some frames following release). Both are now accepted; the additional
+  `0xD8` correction still needs an in-game regression test.
   The observed player pointer
   is shared atomically between the game-state and controller-polling threads,
   even while the option is off, so enabling mid-mode works without re-entry.
@@ -39,16 +40,16 @@ Branch: `modern-breegull-controls` (based on the fork's manual-build main).
 
 ## Risks and necessary manual tests
 
-Earlier builds compiled and demonstrated live switching and working right-X
-turning, but left-stick strafing was intermittent/stuttering. Input traces
-showed `0xCA` translated followed by `0xD1` bypassed, repeatedly. The narrow
-state-filter correction needs fresh in-game validation. Verify in Breegull
-Blaster that movement, strafing and yaw are correctly oriented; that
-right-stick Y still controls pitch; and that leaving the mode immediately
-restores ordinary third-person and Egg Aim controls. In particular check the
-first few frames at mode entry and exit, and reload a level while the toggle
-remains enabled. If the state-family assumptions fail, do not widen the
-allowlist without investigating it.
+The `0xD1` movement-state correction has been gameplay-tested: strafing and
+movement are continuous, including diagonals, and live toggling and ordinary
+third-person/Egg Aim controls still work. A later trace showed that pressing
+fire enters `0xD8`, which bypassed translation and turned left-stick strafing
+back into yaw. This change accepts `0xD8`; **firing while strafing still needs
+an in-game regression test** (including button release and repeated shots).
+Also test the first frames of mode entry/exit and level reload. The current
+implementation remaps only horizontal sticks: SDL right-stick Y is not used,
+and the original R-held precision-aim submode retains left-stick vertical aim.
+Do not widen the state allowlist without new evidence.
 
 N64 pad layout: 0x80079B40 (`osContGetReadData` in `func_800165F0`,
 consumed by `func_8001608C`), 6-byte `OSContPad` entries. State accessor: `func_8009E6F8` (+0x120 to state object,

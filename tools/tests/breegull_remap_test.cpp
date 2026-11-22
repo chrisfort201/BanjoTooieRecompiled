@@ -24,6 +24,9 @@ int main() {
     static_assert(tooie::breegull::c_right == c_right);
     require(tooie::breegull::is_blaster_state(0xCA), "first-person idle accepted");
     require(tooie::breegull::is_blaster_state(0xD1), "first-person movement accepted");
+    require(tooie::breegull::is_blaster_state(0xD8), "egg-firing state accepted");
+    require(tooie::breegull::is_blaster_state(0xD9), "adjacent blaster state retained");
+    require(!tooie::breegull::is_blaster_state(0xD7), "unobserved state rejected");
     require(!tooie::breegull::is_blaster_state(0xD0), "other state rejected");
     require(!tooie::breegull::is_blaster_state(0xD2), "neighboring state rejected");
 
@@ -45,6 +48,12 @@ int main() {
     require((sideways.buttons & (c_left | c_right)) == c_right &&
                 sideways.stick_x == 0 && sideways.stick_y == 0,
             "pure sideways left stick must strafe and never turn");
+    // Z (0x2000) is the observed egg-firing input. Retain it while converting
+    // left-stick X to strafing; animation state validation is tested above.
+    Pad shooting = remap({0x2000u, -80, 0}, 0);
+    require(shooting.buttons == static_cast<uint16_t>(0x2000u | c_left) &&
+                shooting.stick_x == 0,
+            "firing while strafing preserves fire and does not turn");
     Pad diagonal = remap({0, 56, 56}, 0);
     require((diagonal.buttons & (c_left | c_right)) == c_right &&
                 diagonal.stick_x == 0 && diagonal.stick_y == 56,
