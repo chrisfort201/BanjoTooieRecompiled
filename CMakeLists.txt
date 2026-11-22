@@ -213,7 +213,8 @@ if (WIN32)
             LINK_FLAGS_MINSIZEREL "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup"
     )
 
-    target_link_libraries(BanjoTooieRecompiled PRIVATE SDL2 Winmm.lib)
+    # Opt-in Breegull REC notice is a non-activating native Win32 overlay.
+    target_link_libraries(BanjoTooieRecompiled PRIVATE SDL2 Winmm.lib user32.lib gdi32.lib)
 
     # Executable icon. Compiled into the PE's resource section, which is what
     # Explorer, the taskbar and the window's title bar read; no runtime code is

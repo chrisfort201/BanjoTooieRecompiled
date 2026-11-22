@@ -22,6 +22,10 @@ int main() {
     constexpr uint16_t c_right = 0x0001u;
     static_assert(tooie::breegull::c_left == c_left);
     static_assert(tooie::breegull::c_right == c_right);
+    require(tooie::breegull::is_blaster_state(0xCA), "first-person idle accepted");
+    require(tooie::breegull::is_blaster_state(0xD1), "first-person movement accepted");
+    require(!tooie::breegull::is_blaster_state(0xD0), "other state rejected");
+    require(!tooie::breegull::is_blaster_state(0xD2), "neighboring state rejected");
 
     Pad initial{static_cast<uint16_t>(0x8000u | c_up | c_down), -60, -46};
     Pad left = remap(initial, 25000);

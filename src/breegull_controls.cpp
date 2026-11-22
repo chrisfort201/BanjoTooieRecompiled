@@ -9,6 +9,7 @@
 #include "tooie_breegull_remap.hpp"
 #include "tooie_breegull_settings.hpp"
 #include "tooie_breegull_trace.hpp"
+#include "recompinput/players.h"
 
 #include <atomic>
 #include <cstdint>
@@ -40,12 +41,6 @@ gpr guest_address(uint32_t ptr) {
     return static_cast<gpr>(static_cast<int32_t>(ptr));
 }
 
-bool blaster_state(uint32_t state) {
-    // Values reached by the bsfirstp overlay's state transitions. Exclude
-    // ordinary baeggaim, which has a different player-state/overlay path.
-    return (state >= 0xC8 && state <= 0xCC) ||
-           (state >= 0xD9 && state <= 0xDC);
-}
 } // namespace
 
 namespace tooie::breegull {
@@ -61,23 +56,37 @@ void sample_right_stick() {
         right_axis.store(0, std::memory_order_relaxed);
         return;
     }
-    // RecompFrontend already opens SDL controllers. This is read-only; it
-    // does not open, close, remap or take ownership of any controller.
+    // Respect the controller already bound to player 0 by RecompFrontend.
+    // Never select the first enumerated device when multiple physical/virtual
+    // pads exist (e.g. DS4Windows + DualShock). Do not take ownership of it.
+    SDL_GameController* controller = recompinput::players::get_player(0).controller;
+    if (controller && !SDL_GameControllerGetAttached(controller)) controller = nullptr;
+
+    // In single-player mode the frontend can use the implicit one-pad profile
+    // without an explicit player assignment. The only unambiguous fallback is
+    // exactly one *opened* controller. With >1, fail closed rather than
+    // sample an unrelated device. No SDL_GameControllerOpen/Close calls here.
+    if (!controller && recompinput::players::is_single_player_mode()) {
+        SDL_GameController* only = nullptr;
+        bool ambiguous = false;
+        for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+            if (!SDL_IsGameController(i)) continue;
+            SDL_GameController* opened = SDL_GameControllerFromInstanceID(
+                SDL_JoystickGetDeviceInstanceID(i));
+            if (!opened || !SDL_GameControllerGetAttached(opened)) continue;
+            if (only && only != opened) { ambiguous = true; break; }
+            only = opened;
+        }
+        if (!ambiguous) controller = only;
+    }
     uint32_t axis = 0;
     int16_t raw_lx = 0, raw_ly = 0, raw_rx = 0, raw_ry = 0;
-    const int count = SDL_NumJoysticks();
-    for (int i = 0; i < count; ++i) {
-        if (!SDL_IsGameController(i)) continue;
-        const SDL_JoystickID instance = SDL_JoystickGetDeviceInstanceID(i);
-        SDL_GameController* controller = SDL_GameControllerFromInstanceID(instance);
-        if (!controller) continue;
-        const int16_t lx = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX);
-        const int16_t ly = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY);
-        const int16_t x = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTX);
-        const int16_t ry = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTY);
-        raw_lx = lx; raw_ly = ly; raw_rx = x; raw_ry = ry;
-        if (is_enabled) axis = 0x10000u | static_cast<uint16_t>(x);
-        break; // Single player: first active game controller.
+    if (controller) {
+        raw_lx = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX);
+        raw_ly = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY);
+        raw_rx = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTX);
+        raw_ry = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTY);
+        if (is_enabled) axis = 0x10000u | static_cast<uint16_t>(raw_rx);
     }
     if (trace_active()) trace_raw_axes(raw_lx, raw_ly, raw_rx, raw_ry);
     right_axis.store(axis, std::memory_order_release);
@@ -119,7 +128,7 @@ extern "C" void tooie_breegull_hook_pad(uint8_t* rdram, recomp_context*) {
                 reason = "state_ptr_invalid";
             } else {
                 state = static_cast<uint32_t>(MEM_W(4, guest_address(state_ptr)));
-                if (!blaster_state(state)) {
+                if (!tooie::breegull::is_blaster_state(state)) {
                     reason = "not_blaster_state";
                 } else {
                     const uint32_t sampled = right_axis.load(std::memory_order_acquire);
