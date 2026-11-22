@@ -152,7 +152,7 @@ void update_gfx(void*) {
         std::fflush(stderr);
     }
     recompinput::handle_events();
-    tooie::breegull::sample_right_stick();
+    tooie::breegull::sample_mapped_look();
     tooie::breegull::trace_hotkey(window);
     int width = 0, height = 0;
     SDL_GetWindowSize(window, &width, &height);

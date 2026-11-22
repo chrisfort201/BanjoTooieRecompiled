@@ -10,7 +10,10 @@
 #include "tooie_breegull_settings.hpp"
 #include "tooie_breegull_trace.hpp"
 #include "recompinput/players.h"
+#include "recompinput/profiles.h"
+#include "recompinput/input_state.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 
@@ -22,9 +25,10 @@
 
 namespace {
 std::atomic<bool> enabled{false};
-// One packed word avoids pairing a stale analog axis with a new device state.
-// Bit 16 = SDL controller available. The low 16 bits hold signed right X.
-std::atomic<uint32_t> right_axis{0};
+// One atomic snapshot of four RecompFrontend-mapped logical C directions.
+// No physical SDL axis is used for gameplay translation.
+std::atomic<uint64_t> mapped_look{0};
+std::atomic<bool> invert_vertical{true};
 // Shared between the first-person game-state thread and the N64 controller
 // polling thread. A thread_local here made the pad hook see zero forever.
 // Observe the actor even with the toggle off, so turning it on while already
@@ -50,22 +54,61 @@ void set_modern_controls(bool state) {
 bool modern_controls_enabled() {
     return enabled.load(std::memory_order_acquire);
 }
-void sample_right_stick() {
-    const bool is_enabled = enabled.load(std::memory_order_relaxed);
-    if (!is_enabled && !trace_active()) {
-        right_axis.store(0, std::memory_order_relaxed);
-        return;
+void set_invert_vertical_look(bool state) {
+    invert_vertical.store(state, std::memory_order_release);
+}
+// Read the SAME profile slots and per-player input accessor as
+// recompinput::profiles::get_n64_input in the pinned RecompFrontend. This
+// preserves analog magnitude for rebound axes and digital inputs for keys.
+float mapped_strength(int controller_profile, int keyboard_profile,
+                      recompinput::GameInput input) {
+    const auto from_profile = [input](int profile) -> float {
+        if (profile < 0 || profile >= recompinput::profiles::get_input_profile_count())
+            return 0.0f;
+        float strength = 0.0f;
+        for (size_t slot = 0; slot < recompinput::num_bindings_per_input; ++slot) {
+            const recompinput::InputField field =
+                recompinput::profiles::get_input_binding(profile, input, slot);
+            strength += recompinput::get_input_analog(0, field);
+        }
+        return std::clamp(strength, 0.0f, 1.0f);
+    };
+    return std::clamp(from_profile(controller_profile) +
+                      from_profile(keyboard_profile), 0.0f, 1.0f);
+}
+
+void sample_mapped_look() {
+    const bool active = enabled.load(std::memory_order_relaxed);
+    LookInput look{};
+    // This runs on the SDL/UI event thread, after handle_events(). Read-only
+    // frontend profile queries never run in the recompiled game thread.
+    if (active && !recompinput::game_input_disabled() &&
+                  !recompinput::all_input_disabled()) {
+        const bool single = recompinput::players::is_single_player_mode();
+        const int controller_profile = single
+            ? recompinput::profiles::get_sp_controller_profile_index()
+            : recompinput::profiles::get_input_profile_for_player(
+                  0, recompinput::InputDevice::Controller);
+        const int keyboard_profile = single
+            ? recompinput::profiles::get_sp_keyboard_profile_index()
+            : recompinput::profiles::get_input_profile_for_player(
+                  0, recompinput::InputDevice::Keyboard);
+        look.left = mapped_strength(controller_profile, keyboard_profile,
+                                    recompinput::GameInput::C_LEFT);
+        look.right = mapped_strength(controller_profile, keyboard_profile,
+                                     recompinput::GameInput::C_RIGHT);
+        look.up = mapped_strength(controller_profile, keyboard_profile,
+                                  recompinput::GameInput::C_UP);
+        look.down = mapped_strength(controller_profile, keyboard_profile,
+                                    recompinput::GameInput::C_DOWN);
     }
-    // Respect the controller already bound to player 0 by RecompFrontend.
-    // Never select the first enumerated device when multiple physical/virtual
-    // pads exist (e.g. DS4Windows + DualShock). Do not take ownership of it.
+    mapped_look.store(pack_look(look), std::memory_order_release);
+
+    // The optional F9 recorder still logs raw SDL axes as diagnostic context.
+    // These values have NO influence on gameplay or active input bindings.
+    if (!trace_active()) return;
     SDL_GameController* controller = recompinput::players::get_player(0).controller;
     if (controller && !SDL_GameControllerGetAttached(controller)) controller = nullptr;
-
-    // In single-player mode the frontend can use the implicit one-pad profile
-    // without an explicit player assignment. The only unambiguous fallback is
-    // exactly one *opened* controller. With >1, fail closed rather than
-    // sample an unrelated device. No SDL_GameControllerOpen/Close calls here.
     if (!controller && recompinput::players::is_single_player_mode()) {
         SDL_GameController* only = nullptr;
         bool ambiguous = false;
@@ -79,17 +122,15 @@ void sample_right_stick() {
         }
         if (!ambiguous) controller = only;
     }
-    uint32_t axis = 0;
-    int16_t raw_lx = 0, raw_ly = 0, raw_rx = 0, raw_ry = 0;
-    if (controller) {
-        raw_lx = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX);
-        raw_ly = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY);
-        raw_rx = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTX);
-        raw_ry = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTY);
-        if (is_enabled) axis = 0x10000u | static_cast<uint16_t>(raw_rx);
-    }
-    if (trace_active()) trace_raw_axes(raw_lx, raw_ly, raw_rx, raw_ry);
-    right_axis.store(axis, std::memory_order_release);
+    const int16_t raw_lx = controller ? SDL_GameControllerGetAxis(
+        controller, SDL_CONTROLLER_AXIS_LEFTX) : 0;
+    const int16_t raw_ly = controller ? SDL_GameControllerGetAxis(
+        controller, SDL_CONTROLLER_AXIS_LEFTY) : 0;
+    const int16_t raw_rx = controller ? SDL_GameControllerGetAxis(
+        controller, SDL_CONTROLLER_AXIS_RIGHTX) : 0;
+    const int16_t raw_ry = controller ? SDL_GameControllerGetAxis(
+        controller, SDL_CONTROLLER_AXIS_RIGHTY) : 0;
+    trace_raw_axes(raw_lx, raw_ly, raw_rx, raw_ry);
 }
 } // namespace tooie::breegull
 
@@ -131,16 +172,14 @@ extern "C" void tooie_breegull_hook_pad(uint8_t* rdram, recomp_context*) {
                 if (!tooie::breegull::is_blaster_state(state)) {
                     reason = "not_blaster_state";
                 } else {
-                    const uint32_t sampled = right_axis.load(std::memory_order_acquire);
-                    if ((sampled & 0x10000u) == 0) {
-                        reason = "no_sdl_controller";
-                    } else {
-                        reason = "translated";
-                        changed = tooie::breegull::remap(original,
-                            static_cast<int16_t>(sampled & 0xFFFFu));
-                        MEM_H(0, pad) = changed.buttons;
-                        MEM_B(2, pad) = changed.stick_x;
-                    }
+                    reason = "translated";
+                    const uint64_t sampled = mapped_look.load(std::memory_order_acquire);
+                    changed = tooie::breegull::remap(original,
+                        tooie::breegull::unpack_look(sampled),
+                        invert_vertical.load(std::memory_order_acquire));
+                    MEM_H(0, pad) = changed.buttons;
+                    MEM_B(2, pad) = changed.stick_x;
+                    MEM_B(3, pad) = changed.stick_y;
                 }
             }
         }

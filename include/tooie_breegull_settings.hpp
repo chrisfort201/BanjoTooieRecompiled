@@ -4,7 +4,8 @@
 namespace tooie::breegull {
 void set_modern_controls(bool enabled);
 bool modern_controls_enabled();
-void sample_right_stick(); // UI/SDL event thread, after handle_events()
+void set_invert_vertical_look(bool inverted);
+void sample_mapped_look(); // UI/SDL event thread, after handle_events()
 void register_config_tab();
 void apply_loaded_config();
 }

@@ -1,74 +1,87 @@
 # Experimental Breegull Blaster input translation
 
-Branch: `modern-breegull-controls` (based on the fork's manual-build main).
+Branch: `modern-breegull-controls` (fork-only manual Windows build).
 
-- Optional **Modern Breegull Blaster controls** under a new RecompFrontend
-  settings tab, default **off**, live and persisted in `breegull.json`.
-- When enabled **and** the observed first-person player has one of the
-  designated `bsfirstp` states (C8–CC, D1, or D8–DC) **and** a controller is open:
-  left analog X produces original C-left/right strafing; right analog X
-  produces original N64 stick-X turning (continuous analog); left analog Y,
-  C-up/down pitching, other buttons and the original game camera are unchanged.
-- Right-stick sampling prefers the SDL controller assigned to player zero by
-  RecompFrontend. When its single-player mode has no explicit assignment, it
-  uses a controller only if exactly one is already open; it does not choose an
-  arbitrary first device when DS4Windows exposes multiple devices. This is
-  read-only and does not open, close or take ownership of controllers.
-  **Remaining limitation:** the right-X analog axis is still read directly
-  from SDL on that selected device; arbitrary RecompFrontend axis rebindings
-  are not yet honored. Left-stick input and all N64 buttons still come through
-  RecompFrontend's configured profile. Keyboard-only play remains original.
-- Native N64Recomp TOML hooks mark the first-person player and rewrite only the
-  N64 controller packet immediately before `func_8001608C` consumes it. The
-  initial producer-side hook after `osContGetReadData` could race the game's
-  input-consumption thread, so the remap is now performed at the consumer.
-  CSV traces identified two state-filter defects: `0xD1` was previously
-  excluded during movement, and `0xD8` is reached while firing eggs (including
-  some frames following release). Both are now accepted; the additional
-  `0xD8` correction still needs an in-game regression test.
-  The observed player pointer
-  is shared atomically between the game-state and controller-polling threads,
-  even while the option is off, so enabling mid-mode works without re-entry.
-  C-left/right are OSContPad bits 0x0002/0x0001; C-up/down stay untouched.
-  Their corresponding generated-C call sites are checked by
-  `tools/tests/test_breegull_hooks.py`.
-  **Do not edit generated C without a matching TOML hook.**
-- When the toggle is off, the pad hook returns without reading/writing guest
-  memory or altering MIPS registers. The overlay hook only remembers the actor
-  pointer in host memory; neither hook modifies guest state while disabled.
-  Any other player state also passes the packet through unchanged.
+## Controls
 
-## Risks and necessary manual tests
+- **Modern Breegull Blaster controls** is an opt-in setting in the
+  RecompFrontend Breegull Blaster tab. Default **off**; persisted in
+  `breegull.json`. With the option off, original N64 inputs are untouched.
+- With Modern enabled in observed Breegull states C8–CC, D1, or D8–DC:
+  - N64 movement-stick X produces C-left/right strafing, while movement-stick
+    Y retains forward/backward movement in ordinary Breegull play.
+  - RecompFrontend's **configured C-left/right bindings** drive analog turn
+    strength. **C-up/down bindings** control normal vertical looking.
+  - While holding **R** for precision aim, those same C-up/down bindings now
+    control the original analog vertical pitch. The original no-walk R-aim
+    gameplay remains unchanged. Left-stick Y no longer controls precision
+    pitch in Modern mode.
+  - **Invert Vertical Look** is a separate live option, default **on**, that
+    preserves Tooie's original inverted direction. Off switches to the
+    conventional FPS vertical direction. It affects both ordinary Breegull
+    vertical look and R-held precision pitch, but only in Modern mode.
 
-The `0xD1` movement-state correction has been gameplay-tested: strafing and
-movement are continuous, including diagonals, and live toggling and ordinary
-third-person/Egg Aim controls still work. A later trace showed that pressing
-fire enters `0xD8`, which bypassed translation and turned left-stick strafing
-back into yaw. This change accepts `0xD8`; **firing while strafing still needs
-an in-game regression test** (including button release and repeated shots).
-Also test the first frames of mode entry/exit and level reload. The current
-implementation remaps only horizontal sticks: SDL right-stick Y is not used,
-and the original R-held precision-aim submode retains left-stick vertical aim.
-Do not widen the state allowlist without new evidence.
+This layout is intended for two-stick controllers with the N64 movement inputs
+on the left stick and N64 C-direction inputs on the right stick. The gamepad
+can be a DualShock, Xbox pad or another SDL-compatible controller. Custom
+RecompFrontend C-button bindings also work: they are read through the
+**active configured input profiles**, not directly from an assumed physical
+right-stick axis. Analog rebindings retain proportional strength; keyboard
+keys/buttons provide full-strength directions. For unusual bindings (e.g.,
+all C directions assigned to face buttons), the same logical scheme still
+applies, but the result may not resemble an FPS layout. No separate button
+binding editor is added to Breegull's menu.
 
-N64 pad layout: 0x80079B40 (`osContGetReadData` in `func_800165F0`,
-consumed by `func_8001608C`), 6-byte `OSContPad` entries. State accessor: `func_8009E6F8` (+0x120 to state object,
-+0x4 to state value). The observer is `bsfirstp_entrypoint_1` in overlay 108.
-This keeps the original first-person movement/camera engine authoritative.
+## Implementation
 
-The F9 developer recorder can be activated regardless of the Modern Breegull
-setting. It records the original, translated and game-copied N64 packets, plus
-SDL stick samples. Windows displays a click-through recording/saved/error
-notice over the game; other platforms retain the window-title indicator. The
-CSVs are saved in `input-traces/` beside the executable. See
-`BREEGULL_INPUT_TRACE.md`. It does **not** claim to record player position or
-camera orientation.
+The frontend samples `recompinput::profiles::get_input_binding` and
+`recompinput::get_input_analog` for player 0's current controller and keyboard
+profiles on the SDL/UI thread after `handle_events()`. These are the same
+profile/binding accessors used by RecompFrontend's N64 packet producer. Four
+16-bit input strengths (C-left/right/up/down) are packed into one atomic word
+for the game's separate input-consumer thread. The host does not open, close,
+or own any controller. With Modern enabled, the remap also works for keyboard
+bindings and does not require an SDL controller to be connected. If a frontend
+menu blocks gameplay input, the sampled look strengths are zero.
 
-Tests (no ROM):
-```
-py tools/tests/test_breegull_hooks.py
-```
-The pure remap test can run with a C++20 compiler:
-```
+The native game hooks in `banjotooie.us.toml` remain authoritative. The
+first-person overlay hook observes the player actor; the game-consumer hook
+modifies only the N64 controller packet just before `func_8001608C` copies it.
+Neither the TOML hooks nor `RecompiledFuncs/*.c` are changed here. The
+read-only producer/consumer trace hooks remain in place. Never modify
+generated C without a corresponding TOML hook definition.
+
+Trace recordings established two state-filter defects: `0xD1` occurs during
+movement and `0xD8` while firing eggs (and for some frames afterward). Both
+have since been corrected and confirmed through gameplay in earlier builds.
+No additional game states should be included without trace evidence.
+
+**Opt-out guarantee:** when Modern is disabled, the packet hook does not
+read or modify guest input. The overlay hook can still update its host-only
+player pointer. Tracing remains independently opt-in with **F9**.
+
+## Testing status
+
+- Build `5b765e6`: verified continuous movement/strafing, diagonals, live
+  enable/disable, ordinary third-person and normal first-person Egg Aim.
+- Commit `bc71914`: confirmed egg firing no longer disables strafing.
+- **This mapped-profile/R-held pitch/inversion revision has not yet been
+  verified by a complete Windows build or gameplay.** Test both inversion
+  directions with R held/released, shooting while strafing, re-entering the
+  mode, original-controls master toggle, and custom rebinding of a C direction
+  (a different controller axis or a keyboard/button binding).
+
+N64 packet: `0x80079B40`, copied by `func_8001608C`; game-side copy
+`0x80079B58`. The observed first-person player comes from overlay 108,
+`bsfirstp_entrypoint_1`. See `BREEGULL_INPUT_TRACE.md` for optional F9 CSV
+recordings. The recorder confirms input values copied by the game, **not**
+actual world movement or camera orientation.
+
+Run tests with Python and a C++20 compiler:
+
+```sh
+python tools/tests/test_breegull_hooks.py
+python tools/tests/test_camera_hooks.py
 c++ -std=c++20 -Iinclude tools/tests/breegull_remap_test.cpp -o breegull_remap_test
+./breegull_remap_test
 ```

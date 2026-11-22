@@ -31,11 +31,14 @@ orientation have not yet been tied to validated game-state fields. A second,
 separately verified state hook would be required to measure those accurately;
 please don't interpret raw input values as observed physical movement.
 
-Controller samples use the SDL controller bound to player 0 in RecompFrontend.
-In single-player mode without an explicit assignment, an implicit pad is used
-only when exactly one opened controller is present. With multiple ambiguous
-controllers no raw right-stick axes are sampled: the recorder does **not**
-claim that the first device is the frontend's selected input.
+Raw SDL stick samples are **diagnostics only**. They prefer the frontend's
+explicitly assigned player-0 controller, with an unambiguous one-controller
+fallback for display in single-player mode. The game input remapper no longer
+uses these raw samples: it reads active RecompFrontend C-input bindings and
+analog strengths, which support remapped sticks, buttons and keyboard keys.
+The trace's `raw_sdl` values should not be mistaken for the logical control
+strength after rebinding, and they may be unavailable when several controllers
+are open without an explicit assignment.
 
 The recorder does not open or close controllers. Outside an active capture, it
 performs only a keyboard-state check and leaves all existing guest behavior
