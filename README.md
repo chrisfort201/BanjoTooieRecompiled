@@ -44,7 +44,7 @@ Available builds will be listed under [Releases](https://github.com/chrisfort201
 
 **Linux x64 (experimental):** if a Linux archive is available, extract it and run `./run.sh` from the extracted directory. Consult the [Linux dependencies in the base-version README](https://github.com/chrisfort201/BanjoTooieRecompiled/blob/9e5852541ba1436417e2c4468960e8c6de6deda5/README.md). The Linux build of this fork has not been launched or playtested.
 
-**No ROM is included.** You need your own legitimately obtained copy of Banjo-Tooie (USA v1.0).
+**No ROM is included.** You need your own  copy of Banjo-Tooie (USA v1.0).
 
 ## Testing and compatibility
 
