@@ -11,9 +11,19 @@ constexpr const char* tab_id = "breegull";
 constexpr const char* option_id = "modern_controls";
 constexpr const char* invert_id = "invert_vertical_look";
 constexpr const char* vertical_speed_id = "normal_vertical_speed";
+
+// Keep inactive preferences visible but not editable. The game-side native
+// hooks independently gate all input and pitch changes on Modern=On.
+void update_dependent_options(bool modern_enabled) {
+    auto& config = recompui::config::get_config(tab_id);
+    config.update_option_disabled(invert_id, !modern_enabled);
+    config.update_option_disabled(vertical_speed_id, !modern_enabled);
+}
+
 void apply(const recomp::config::ConfigValueVariant& value) {
     if (const bool* selected = std::get_if<bool>(&value)) {
         set_modern_controls(*selected);
+        update_dependent_options(*selected);
     }
 }
 void apply_invert(const recomp::config::ConfigValueVariant& value) {
@@ -42,7 +52,6 @@ void register_config_tab() {
         "On preserves the game's original vertical look direction "
         "(stick down looks up). Off uses standard FPS vertical look. "
         "Only affects Modern Breegull Blaster controls.", true);
-    config.add_option_disable_dependency(invert_id, option_id, false);
     config.add_option_change_callback(invert_id,
         [](auto current, auto, auto) { apply_invert(current); });
 
@@ -53,7 +62,6 @@ void register_config_tab() {
         "1.0x means the original game's VERTICAL speed, not the same speed "
         "as horizontal looking. Modern controls must be enabled.",
         0.5, 3.0, 0.25, 2, false, 1.0);
-    config.add_option_disable_dependency(vertical_speed_id, option_id, false);
     config.add_option_change_callback(vertical_speed_id,
         [](auto current, auto, auto) { apply_vertical_speed(current); });
 }

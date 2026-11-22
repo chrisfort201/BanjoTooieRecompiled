@@ -139,3 +139,13 @@ movement. Walk forward/backward, stop, strafe and fire after looking up or
 down with the look stick released. Hold R to check precision pitch remains
 unchanged. Disable Modern to verify original leveling returns. Confirm both
 new disabled-menu dependencies and setting persistence after restart.
+
+### Menu dependency implementation
+
+The Stage-2 Windows build showed that the declarative
+`add_option_disable_dependency` rules did not grey out the inactive settings.
+The master toggle callback now explicitly calls `Config::update_option_disabled`
+for both controls; startup applies the same state using the persisted master
+setting. This uses RecompFrontend's existing UI option-state mechanism. No
+gameplay logic is changed, and disabling Modern retains the last inversion
+and speed preferences for when Modern is re-enabled.
