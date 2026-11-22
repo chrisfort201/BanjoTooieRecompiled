@@ -14,8 +14,10 @@ struct Pad {
     int8_t stick_y;
 };
 
-constexpr uint16_t c_left  = 0x0008;
-constexpr uint16_t c_right = 0x0004;
+// Standard libultra OSContPad masks: C-up=0x8, C-down=0x4,
+// C-left=0x2, C-right=0x1. Leave vertical aiming buttons untouched.
+constexpr uint16_t c_left  = 0x0002;
+constexpr uint16_t c_right = 0x0001;
 
 inline Pad remap(Pad pad, int16_t right_x) {
     // Breegull Blaster originally uses stick X to turn and C-left/C-right to

@@ -13,12 +13,17 @@ Branch: `modern-breegull-controls` (based on the fork's manual-build main).
   controller profiles or opening/closing SDL devices. This is an initial
   controller-only implementation; keyboard controls remain original.
 - Native N64Recomp TOML hooks mark the first-person player and rewrite only the
-  N64 controller packet after Tooie's original read. Their corresponding
-  generated-C call sites are checked by `tools/tests/test_breegull_hooks.py`.
+  N64 controller packet after Tooie's original read. The observed player pointer
+  is shared atomically between the game-state and controller-polling threads,
+  even while the option is off, so enabling mid-mode works without re-entry.
+  C-left/right are OSContPad bits 0x0002/0x0001; C-up/down stay untouched.
+  Their corresponding generated-C call sites are checked by
+  `tools/tests/test_breegull_hooks.py`.
   **Do not edit generated C without a matching TOML hook.**
-- When the toggle is off, both hooks return without reading/writing guest
-  memory or altering MIPS registers. Any other player state also passes the
-  packet through unchanged.
+- When the toggle is off, the pad hook returns without reading/writing guest
+  memory or altering MIPS registers. The overlay hook only remembers the actor
+  pointer in host memory; neither hook modifies guest state while disabled.
+  Any other player state also passes the packet through unchanged.
 
 ## Risks and necessary manual tests
 

@@ -21,8 +21,12 @@ std::atomic<bool> enabled{false};
 // One packed word avoids pairing a stale analog axis with a new device state.
 // Bit 16 = SDL controller available. The low 16 bits hold signed right X.
 std::atomic<uint32_t> right_axis{0};
-// Updated only by the recompilation thread's first-person overlay hook.
-thread_local uint32_t firstperson_player = 0;
+// Shared between the first-person game-state thread and the N64 controller
+// polling thread. A thread_local here made the pad hook see zero forever.
+// Observe the actor even with the toggle off, so turning it on while already
+// in Breegull Blaster does not depend on the overlay entrypoint running again.
+// This host-side bookkeeping never changes guest state when disabled.
+std::atomic<uint32_t> firstperson_player{0};
 
 bool valid_guest_pointer(uint32_t ptr, uint32_t bytes) {
     // Tooie uses KSEG0 guest pointers for objects in the 8 MiB N64 RDRAM.
@@ -71,17 +75,19 @@ void sample_right_stick() {
 } // namespace tooie::breegull
 
 extern "C" void tooie_breegull_hook_player(uint8_t*, recomp_context* ctx) {
-    if (!enabled.load(std::memory_order_relaxed)) return;
-    // bsfirstp_entrypoint_1 receives the player actor as a0. Keeping this
-    // pointer is not itself a mode detector: each packet checks *live* state.
-    firstperson_player = static_cast<uint32_t>(ctx->r4);
+    // bsfirstp_entrypoint_1 receives the player actor as a0. Keep its guest
+    // pointer across host threads; the pad hook still checks the *live* player
+    // state before changing any N64 input. No guest memory is read here.
+    const uint32_t player = static_cast<uint32_t>(ctx->r4);
+    firstperson_player.store(valid_guest_pointer(player, 0x124) ? player : 0,
+                             std::memory_order_release);
 }
 
 extern "C" void tooie_breegull_hook_pad(uint8_t* rdram, recomp_context*) {
     // Exact neutral path: no guest reads, guest writes or register mutations.
     if (!enabled.load(std::memory_order_acquire)) return;
 
-    const uint32_t player = firstperson_player;
+    const uint32_t player = firstperson_player.load(std::memory_order_acquire);
     if (!valid_guest_pointer(player, 0x124)) return;
     const uint32_t state_ptr = static_cast<uint32_t>(
         MEM_W(0x120, guest_address(player)));
