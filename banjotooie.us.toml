@@ -637,3 +637,27 @@ text = "tooie_breegull_hook_consumed(rdram, ctx);"
 func = "func_800165F0"
 before_vram = 0x8001661C
 text = "tooie_breegull_hook_produced(rdram, ctx);"
+
+
+# F9-only read-only first-person camera diagnostics. The 0x20C field is a
+# CANDIDATE pitch angle; these hooks observe but DO NOT modify game state.
+# All four sites are in the existing bsfirstp overlay, not third-person camera.
+[[patches.hook]]
+func = "func_8080682C_bsfirstp"
+before_vram = 0x80806884
+text = "tooie_breegull_hook_camera_trace(rdram, ctx, 0);"
+
+[[patches.hook]]
+func = "func_8080682C_bsfirstp"
+before_vram = 0x808068D8
+text = "tooie_breegull_hook_camera_trace(rdram, ctx, 1);"
+
+[[patches.hook]]
+func = "func_808067B0_bsfirstp"
+before_vram = 0x808067CC
+text = "tooie_breegull_hook_camera_trace(rdram, ctx, 2);"
+
+[[patches.hook]]
+func = "func_808067B0_bsfirstp"
+before_vram = 0x808067D8
+text = "tooie_breegull_hook_camera_trace(rdram, ctx, 3);"

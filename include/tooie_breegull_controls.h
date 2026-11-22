@@ -13,6 +13,11 @@ void tooie_breegull_hook_player(uint8_t* rdram, recomp_context* ctx);
 void tooie_breegull_hook_pad(uint8_t* rdram, recomp_context* ctx);
 void tooie_breegull_hook_consumed(uint8_t* rdram, recomp_context* ctx);
 void tooie_breegull_hook_produced(uint8_t* rdram, recomp_context* ctx);
+// F9-only observational hooks into candidate first-person camera updates.
+// Stage IDs: 0 before update; 1 after update/clamp; 2 before reset; 3 after.
+// They NEVER modify recomp_context, guest RDRAM, or gameplay settings.
+void tooie_breegull_hook_camera_trace(uint8_t* rdram, recomp_context* ctx,
+                                     uint32_t stage);
 #ifdef __cplusplus
 }
 #endif

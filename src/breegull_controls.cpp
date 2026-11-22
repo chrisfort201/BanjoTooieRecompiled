@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 
 #ifdef _WIN32
 #include "SDL.h"
@@ -210,4 +211,58 @@ extern "C" void tooie_breegull_hook_consumed(uint8_t* rdram, recomp_context*) {
         static_cast<int8_t>(MEM_B(2, copied)),
         static_cast<int8_t>(MEM_B(3, copied)),
     });
+}
+
+
+// Diagnostic-only observations of the *candidate* first-person pitch state.
+// The first-person overlay's funcs_45/44 hooks supply live ctx registers at
+// precise instruction boundaries. These offsets came from the actual guest
+// instructions, NOT from a guessed global camera pointer. The CSV is needed
+// to establish whether 0x20C corresponds to rendered vertical viewing angle.
+extern "C" void tooie_breegull_hook_camera_trace(uint8_t* rdram,
+                                                    recomp_context* ctx,
+                                                    uint32_t stage) {
+    if (!tooie::breegull::trace_active() || stage > 3) return;
+
+    const uint32_t object = static_cast<uint32_t>(
+        stage < 2 ? ctx->r16 : ctx->r2);
+    tooie::breegull::CameraSample sample{};
+    sample.object = object;
+    sample.valid = valid_guest_pointer(object, 0x218);
+    if (sample.valid) {
+        const gpr guest = guest_address(object);
+        const auto load_float = [rdram, guest](uint32_t offset) -> float {
+            const uint32_t bits = static_cast<uint32_t>(MEM_W(offset, guest));
+            float value;
+            std::memcpy(&value, &bits, sizeof(value));
+            return value;
+        };
+        sample.mode = static_cast<uint32_t>(MEM_W(0xC, guest));
+        sample.angle_20c = load_float(0x20C);
+        sample.angle_210 = load_float(0x210);
+        sample.angle_214 = load_float(0x214);
+        sample.bound_1e8 = load_float(0x1E8);
+        sample.bound_1ec = load_float(0x1EC);
+        // These registers are meaningful only at their corresponding sites.
+        if (stage == 0) {
+            sample.reg_f4 = ctx->f4.fl;  // previous angle at 0x80806884
+            sample.reg_f6 = ctx->f6.fl;  // candidate angular increment
+        } else if (stage == 2) {
+            sample.reg_f0 = ctx->f0.fl;  // reset replacement value
+        }
+    }
+
+    // Capture the same observed player-state family as the pad hook. A
+    // player pointer can outlive an overlay; validate before every read.
+    uint32_t player_state = 0;
+    const uint32_t player = firstperson_player.load(std::memory_order_acquire);
+    if (valid_guest_pointer(player, 0x124)) {
+        const uint32_t state_ptr = static_cast<uint32_t>(
+            MEM_W(0x120, guest_address(player)));
+        if (valid_guest_pointer(state_ptr, 8)) {
+            player_state = static_cast<uint32_t>(
+                MEM_W(4, guest_address(state_ptr)));
+        }
+    }
+    tooie::breegull::trace_camera(stage, player_state, sample);
 }

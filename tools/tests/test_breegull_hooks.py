@@ -10,6 +10,10 @@ expected = [
     ("func_8001608C", 0x800160C4, "tooie_breegull_hook_pad(rdram, ctx);", "funcs_0.c"),
     ("func_8001608C", 0x800160E8, "tooie_breegull_hook_consumed(rdram, ctx);", "funcs_0.c"),
     ("func_800165F0", 0x8001661C, "tooie_breegull_hook_produced(rdram, ctx);", "funcs_0.c"),
+    ("func_8080682C_bsfirstp", 0x80806884, "tooie_breegull_hook_camera_trace(rdram, ctx, 0);", "funcs_45.c"),
+    ("func_8080682C_bsfirstp", 0x808068D8, "tooie_breegull_hook_camera_trace(rdram, ctx, 1);", "funcs_45.c"),
+    ("func_808067B0_bsfirstp", 0x808067CC, "tooie_breegull_hook_camera_trace(rdram, ctx, 2);", "funcs_44.c"),
+    ("func_808067B0_bsfirstp", 0x808067D8, "tooie_breegull_hook_camera_trace(rdram, ctx, 3);", "funcs_44.c"),
 ]
 for name, address, call, filename in expected:
     assert sum(h.get("func") == name and h.get("before_vram") == address
@@ -20,4 +24,4 @@ for name, address, call, filename in expected:
     addr_comment = f"// 0x{address:08X}:"
     assert body.index(call) < body.index(addr_comment)
     assert not body[body.index(call) + len(call):body.index(addr_comment)].strip()
-print("PASS: 4 Breegull native TOML hooks match committed generated C positions")
+print("PASS: 8 Breegull native TOML hooks (4 input + 4 camera trace) match generated C positions")

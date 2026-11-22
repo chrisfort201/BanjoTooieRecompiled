@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -49,6 +50,10 @@ struct Session {
     clock_t::time_point began{};
     clock_t::time_point stopped{};
     uint64_t next_packet = 0;
+    // Best-effort latest game-consumed N64 packet, used to correlate camera
+    // events with the closest input poll. Camera events are NOT poll-synchronous.
+    Pad last_pad{};
+    uint64_t last_pad_packet = 0;
     bool key_down = false;
     bool saved_notification = false;
     bool error_notification = false;
@@ -154,7 +159,7 @@ void print_record(Session& s, const char* stage, uint64_t serial,
            << axis(0) << ',' << axis(1) << ',' << axis(2) << ',' << axis(3)
            << ',' << player_state << ',' << static_cast<int>(pad.stick_x)
            << ',' << static_cast<int>(pad.stick_y)
-           << ',' << pad.buttons << '\n';
+           << ',' << pad.buttons << ",,,,,,,,,,,\n";
 }
 
 void start(Session& s) {
@@ -198,11 +203,16 @@ void start(Session& s) {
     }
     s.began = clock_t::now();
     s.next_packet = 0;
+    s.last_pad = {};
+    s.last_pad_packet = 0;
     request_stop.store(false, std::memory_order_release);
     s.saved_notification = false;
     s.error_notification = false;
     s.file << "elapsed_ms,packet,stage,reason,SDL_LX,SDL_LY,SDL_RX,SDL_RY,"
-              "player_state,N64_X,N64_Y,N64_buttons\n";
+              "player_state,N64_X,N64_Y,N64_buttons,"
+              "camera_object,camera_valid,camera_mode,angle_20c,angle_210,"
+              "angle_214,bound_1e8,bound_1ec,reg_f4,reg_f6,reg_f0\n";
+    s.file << std::setprecision(9);
     if (!s.file) {
         std::fprintf(stderr, "[breegull-trace] header write failed\n");
         s.file.close();
@@ -271,6 +281,8 @@ void trace_packet(Pad before, Pad after, uint32_t state, const char* reason) {
     std::lock_guard<std::mutex> lock(s.mutex);
     if (!trace_active() || !s.file) return;
     packet_id = ++s.next_packet;
+    s.last_pad = after;
+    s.last_pad_packet = packet_id;
     print_record(s, "incoming", packet_id, before, state, reason);
     print_record(s, "remapped", packet_id, after, state, reason);
     // Keep captures bounded even if the user forgets to stop.
@@ -291,5 +303,52 @@ void trace_consumed(Pad pad) {
     std::lock_guard<std::mutex> lock(s.mutex);
     if (!trace_active() || !s.file) return;
     print_record(s, "copied_by_game", packet_id, pad, 0, "copied");
+}
+
+void trace_camera(uint32_t stage, uint32_t state, const CameraSample& sample) {
+    if (!trace_active() || stage > 3) return;
+    auto& s = session();
+    std::lock_guard<std::mutex> lock(s.mutex);
+    if (!trace_active() || !s.file) return;
+    constexpr const char* stages[] = {
+        "camera_before_update", "camera_after_update",
+        "camera_before_reset", "camera_after_reset"
+    };
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        clock_t::now() - s.began).count();
+    const uint64_t axes = raw_axes.load(std::memory_order_acquire);
+    const auto axis = [axes](unsigned n) -> int16_t {
+        return static_cast<int16_t>((axes >> (16 * n)) & 0xFFFFu);
+    };
+    // The packet is the most recently observed N64 input, not necessarily the
+    // one associated with this camera tick; timestamps must be used as well.
+    s.file << ms << ',' << s.last_pad_packet << ',' << stages[stage]
+           << ",candidate_angle," << axis(0) << ',' << axis(1) << ','
+           << axis(2) << ',' << axis(3) << ',' << state << ','
+           << static_cast<int>(s.last_pad.stick_x) << ','
+           << static_cast<int>(s.last_pad.stick_y) << ','
+           << s.last_pad.buttons << ',' << sample.object << ','
+           << (sample.valid ? 1 : 0) << ',';
+    if (sample.valid) {
+        s.file << sample.mode << ',';
+        const auto write_float = [&s](float value) {
+            if (std::isfinite(value)) s.file << value;
+        };
+        write_float(sample.angle_20c); s.file << ',';
+        write_float(sample.angle_210); s.file << ',';
+        write_float(sample.angle_214); s.file << ',';
+        write_float(sample.bound_1e8); s.file << ',';
+        write_float(sample.bound_1ec); s.file << ',';
+        if (stage == 0) write_float(sample.reg_f4);
+        s.file << ',';
+        if (stage == 0) write_float(sample.reg_f6);
+        s.file << ',';
+        if (stage == 2) write_float(sample.reg_f0);
+    } else {
+        // No dereference of invalid guest memory; all nine remaining
+        // camera-value fields are empty (camera_mode through reg_f0).
+        s.file << ",,,,,,,,";
+    }
+    s.file << '\n';
 }
 } // namespace tooie::breegull

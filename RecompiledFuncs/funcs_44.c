@@ -29136,12 +29136,14 @@ RECOMP_FUNC void func_808067B0_bsfirstp(uint8_t* rdram, recomp_context* ctx) {
     ctx->r2 = MEM_W(ctx->r29, 0X1C);
     // 0x808067C8: mtc1        $zero, $f2
     ctx->f2.u32l = 0;
+    tooie_breegull_hook_camera_trace(rdram, ctx, 2);
     // 0x808067CC: swc1        $f0, 0x20C($v0)
     MEM_W(0X20C, ctx->r2) = ctx->f0.u32l;
     // 0x808067D0: swc1        $f2, 0x210($v0)
     MEM_W(0X210, ctx->r2) = ctx->f2.u32l;
     // 0x808067D4: swc1        $f2, 0x214($v0)
     MEM_W(0X214, ctx->r2) = ctx->f2.u32l;
+    tooie_breegull_hook_camera_trace(rdram, ctx, 3);
     // 0x808067D8: lw          $ra, 0x14($sp)
     ctx->r31 = MEM_W(ctx->r29, 0X14);
     // 0x808067DC: addiu       $sp, $sp, 0x20

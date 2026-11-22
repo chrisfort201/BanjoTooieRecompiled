@@ -124,6 +124,7 @@ L_8080687C:
 L_80806880:
     // 0x80806880: lwc1        $f6, 0x20($sp)
     ctx->f6.u32l = MEM_W(ctx->r29, 0X20);
+    tooie_breegull_hook_camera_trace(rdram, ctx, 0);
     // 0x80806884: jal         0x80013728
     // 0x80806888: add.s       $f12, $f4, $f6
     CHECK_FR(ctx, 12);
@@ -208,6 +209,7 @@ L_808068C4:
     // 0x808068D4: lw          $ra, 0x1C($sp)
     ctx->r31 = MEM_W(ctx->r29, 0X1C);
 L_808068D8:
+    tooie_breegull_hook_camera_trace(rdram, ctx, 1);
     // 0x808068D8: lw          $s0, 0x18($sp)
     ctx->r16 = MEM_W(ctx->r29, 0X18);
     // 0x808068DC: addiu       $sp, $sp, 0x28
