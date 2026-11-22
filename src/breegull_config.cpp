@@ -48,7 +48,7 @@ void register_config_tab() {
         "BREEGULL_INPUT_TRACE.md for the trace folder.", false);
     config.add_option_change_callback(option_id,
         [](auto current, auto, auto) { apply(current); });
-    config.add_bool_option(invert_id, "Invert Vertical Look",
+    config.add_bool_option(invert_id, "[Modern only] Invert Vertical Look",
         "On preserves the game's original vertical look direction "
         "(stick down looks up). Off uses standard FPS vertical look. "
         "Only affects Modern Breegull Blaster controls.", true);
@@ -56,7 +56,7 @@ void register_config_tab() {
         [](auto current, auto, auto) { apply_invert(current); });
 
     config.add_number_option(vertical_speed_id,
-        "Vertical Look Speed (Outside R-Aim)",
+        "[Modern only] Vertical Look Speed (Outside R-Aim)",
         "Changes only the ordinary Breegull Blaster C-up/down pitch speed. "
         "Does not affect horizontal turning or R-held precision aiming. "
         "1.0x means the original game's VERTICAL speed, not the same speed "
