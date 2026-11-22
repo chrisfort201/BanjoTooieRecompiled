@@ -16152,6 +16152,9 @@ RECOMP_FUNC void func_8001608C(uint8_t* rdram, recomp_context* ctx) {
     ctx->r16 = S32(0X8008 << 16);
     // 0x800160C0: addiu       $s0, $s0, -0x64C0
     ctx->r16 = ADD32(ctx->r16, -0X64C0);
+    // Translate on the game input-consumption path, immediately before
+    // the first read of the OSContPad packet (0x800160C8).
+    tooie_breegull_hook_pad(rdram, ctx);
     // 0x800160C4: lui         $v0, 0x8008
     ctx->r2 = S32(0X8008 << 16);
     // 0x800160C8: lb          $t6, 0x2($s0)
@@ -17189,7 +17192,6 @@ RECOMP_FUNC void func_800165F0(uint8_t* rdram, recomp_context* ctx) {
     // 0x80016618: addiu       $a0, $a0, -0x64C0
     ctx->r4 = ADD32(ctx->r4, -0X64C0);
     after_1:
-    tooie_breegull_hook_pad(rdram, ctx);
     // 0x8001661C: lw          $ra, 0x14($sp)
     ctx->r31 = MEM_W(ctx->r29, 0X14);
 L_80016620:

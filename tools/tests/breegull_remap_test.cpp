@@ -37,6 +37,15 @@ int main() {
     require(center.buttons == 0x0020u && center.stick_x == 0 && center.stick_y == 31,
             "neutral axes cancel strafe and yaw without losing other buttons");
 
+    Pad sideways = remap({0, 80, 0}, 0);
+    require((sideways.buttons & (c_left | c_right)) == c_right &&
+                sideways.stick_x == 0 && sideways.stick_y == 0,
+            "pure sideways left stick must strafe and never turn");
+    Pad diagonal = remap({0, 56, 56}, 0);
+    require((diagonal.buttons & (c_left | c_right)) == c_right &&
+                diagonal.stick_x == 0 && diagonal.stick_y == 56,
+            "diagonal left stick must strafe plus walk without turning");
+
     Pad right = remap({0, 80, 0}, -32768);
     require((right.buttons & c_right) != 0 && right.stick_x == -80,
             "right strafe and full left yaw");

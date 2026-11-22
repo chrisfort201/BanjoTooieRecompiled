@@ -13,7 +13,11 @@ Branch: `modern-breegull-controls` (based on the fork's manual-build main).
   controller profiles or opening/closing SDL devices. This is an initial
   controller-only implementation; keyboard controls remain original.
 - Native N64Recomp TOML hooks mark the first-person player and rewrite only the
-  N64 controller packet after Tooie's original read. The observed player pointer
+  N64 controller packet immediately before `func_8001608C` consumes it. The
+  initial producer-side hook after `osContGetReadData` could race the game's
+  input-consumption thread, causing alternating/unexpected stick and button
+  states. This version moves the existing hook; no new hook is needed.
+  The observed player pointer
   is shared atomically between the game-state and controller-polling threads,
   even while the option is off, so enabling mid-mode works without re-entry.
   C-left/right are OSContPad bits 0x0002/0x0001; C-up/down stay untouched.
@@ -27,17 +31,18 @@ Branch: `modern-breegull-controls` (based on the fork's manual-build main).
 
 ## Risks and necessary manual tests
 
-This is *not yet gameplay-tested or Windows-built*. The first-person player
-pointer and state allowlist were inferred from static generated code. Verify in
-Breegull Blaster that movement, strafing and yaw are correctly oriented; that
+Earlier builds compiled and demonstrated live switching and working right-X
+turning, but left-stick strafing was intermittent/stuttering. The pad-hook
+placement has now changed and needs fresh in-game validation. Verify in Breegull
+Blaster that movement, strafing and yaw are correctly oriented; that
 right-stick Y still controls pitch; and that leaving the mode immediately
 restores ordinary third-person and Egg Aim controls. In particular check the
 first few frames at mode entry and exit, and reload a level while the toggle
 remains enabled. If the state-family assumptions fail, do not widen the
 allowlist without investigating it.
 
-N64 pad layout: 0x80079B40 (`osContGetReadData` in `func_800165F0`), 6-byte
-`OSContPad` entries. State accessor: `func_8009E6F8` (+0x120 to state object,
+N64 pad layout: 0x80079B40 (`osContGetReadData` in `func_800165F0`,
+consumed by `func_8001608C`), 6-byte `OSContPad` entries. State accessor: `func_8009E6F8` (+0x120 to state object,
 +0x4 to state value). The observer is `bsfirstp_entrypoint_1` in overlay 108.
 This keeps the original first-person movement/camera engine authoritative.
 

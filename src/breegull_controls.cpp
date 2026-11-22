@@ -1,7 +1,9 @@
 // Modern Breegull Blaster input translation, outside generated game code.
 // One overlay-scoped pointer hook observes the actual first-person player;
-// one core input hook translates the N64 controller packet *after* the usual
-// osContGetReadData call. Both hook declarations live in banjotooie.us.toml
+// one core input hook translates the N64 controller packet immediately before
+// the game copies it into its processed input state (func_8001608C). Hooking
+// the async osContGetReadData producer risks tearing/racing with that copy.
+// Both hook declarations live in banjotooie.us.toml
 // so a subsequent N64Recomp run recreates the calls automatically.
 #include "tooie_breegull_controls.h"
 #include "tooie_breegull_remap.hpp"
@@ -99,6 +101,8 @@ extern "C" void tooie_breegull_hook_pad(uint8_t* rdram, recomp_context*) {
     const uint32_t sampled = right_axis.load(std::memory_order_acquire);
     if ((sampled & 0x10000u) == 0) return; // No SDL controller; preserve input.
 
+    // The gameplay input consumer will read this packet immediately after
+    // the native hook returns. No other game engine state is overridden.
     constexpr uint32_t pad_addr = 0x80079B40u; // controller 0, OSContPad[0]
     const gpr pad = guest_address(pad_addr);
     tooie::breegull::Pad original{

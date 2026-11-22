@@ -7,7 +7,7 @@ root = Path(__file__).resolve().parents[2]
 hooks = tomllib.loads((root / "banjotooie.us.toml").read_text())["patches"]["hook"]
 expected = [
     ("bsfirstp_entrypoint_1", 0x808000E4, "tooie_breegull_hook_player(rdram, ctx);", "funcs_44.c"),
-    ("func_800165F0", 0x8001661C, "tooie_breegull_hook_pad(rdram, ctx);", "funcs_0.c"),
+    ("func_8001608C", 0x800160C4, "tooie_breegull_hook_pad(rdram, ctx);", "funcs_0.c"),
 ]
 for name, address, call, filename in expected:
     assert sum(h.get("func") == name and h.get("before_vram") == address

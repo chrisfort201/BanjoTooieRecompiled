@@ -611,15 +611,16 @@ func = "func_80112A84"
 before_vram = 0x80112C28
 text = "tooie_camera_hook_tick(rdram, ctx, 1);"
 
-# Modern Breegull Blaster control translation: mode observation happens only
-# in the first-person player overlay; N64 pad translation happens immediately
-# after the original controller read. Both are inert when the option is off.
+# Modern Breegull Blaster input translation: observe the first-person actor
+# through the overlay. Translate the pad on the game input consumer thread,
+# immediately before it copies the N64 pad buffer; do not hook the asynchronous
+# osContGetReadData producer, whose packet could race the consumer.
 [[patches.hook]]
 func = "bsfirstp_entrypoint_1"
 before_vram = 0x808000E4
 text = "tooie_breegull_hook_player(rdram, ctx);"
 
 [[patches.hook]]
-func = "func_800165F0"
-before_vram = 0x8001661C
+func = "func_8001608C"
+before_vram = 0x800160C4
 text = "tooie_breegull_hook_pad(rdram, ctx);"
