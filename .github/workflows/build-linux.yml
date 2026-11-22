@@ -1,0 +1,99 @@
+name: Build - Linux x64 (manual)
+
+# Fork-only Linux build. Never triggered by pushes and never publishes a Release.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      BT_VERSION: 1.0.0+fork.linux.${{ github.run_number }}
+    steps:
+      - name: Check out source and pinned submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang ninja-build pkg-config \
+            libsdl2-dev libfreetype-dev libdbus-1-dev file
+
+      - name: Apply project dependency patches
+        run: python tools/setup_deps.py
+
+      - name: Verify project dependency patches
+        run: python tools/setup_deps.py --check
+
+      - name: Verify native camera and Breegull hooks
+        run: |
+          python tools/tests/test_camera_hooks.py
+          python tools/tests/test_breegull_hooks.py
+
+      - name: Configure with Clang
+        run: |
+          clang --version | head -1
+          cmake -S . -B build-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+
+      - name: Build
+        run: cmake --build build-cmake --target BanjoTooieRecompiled --parallel 2
+
+      - name: Run CMake host-side camera and Breegull tests
+        run: |
+          cmake --build build-cmake --target TooieCameraSettingsTests TooieBreegullControlsTests --parallel 2
+          ./build-cmake/TooieCameraSettingsTests
+          ./build-cmake/TooieBreegullControlsTests
+
+      - name: Verify Linux x64 executable and runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe=build-cmake/BanjoTooieRecompiled
+          test -x "$exe"
+          file "$exe"
+          file "$exe" | grep -q 'ELF 64-bit LSB.*x86-64'
+          missing="$(ldd "$exe" | grep 'not found' || true)"
+          if [ -n "$missing" ]; then echo "$missing"; exit 1; fi
+          for f in build-cmake/assets/recomp.rcss \
+                   build-cmake/assets/LatoLatin-Regular.ttf \
+                   build-cmake/assets/menu.png; do
+            test -f "$f"
+          done
+          grep -qa -- "$BT_VERSION" "$exe"
+          echo 'Linux x64 compile/link/package checks passed (no gameplay executed)'
+
+      - name: Package Linux x64 build
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage=package/BanjoTooieRecompiled
+          mkdir -p "$stage"
+          cp build-cmake/BanjoTooieRecompiled "$stage/"
+          cp -r build-cmake/assets "$stage/assets"
+          cp README.md COPYING CAMERA_PATCH.md BREEGULL_CONTROLS.md \
+             BREEGULL_INPUT_TRACE.md RELEASING.md "$stage/"
+          cat > "$stage/run.sh" <<'EOF'
+          #!/bin/sh
+          cd "$(dirname "$(readlink -f "$0")")" || exit 1
+          exec ./BanjoTooieRecompiled "$@"
+          EOF
+          chmod +x "$stage/run.sh" "$stage/BanjoTooieRecompiled"
+          (cd package && tar czf BanjoTooieRecompiled-linux-x64.tar.gz BanjoTooieRecompiled)
+          sha256sum package/BanjoTooieRecompiled-linux-x64.tar.gz
+
+      - name: Upload Linux x64 package (untested gameplay)
+        uses: actions/upload-artifact@v4
+        with:
+          name: BanjoTooieRecompiled-linux-x64-${{ github.run_number }}
+          path: package/BanjoTooieRecompiled-linux-x64.tar.gz
+          retention-days: 3
+          if-no-files-found: error

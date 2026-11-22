@@ -1,9 +1,9 @@
 # Third-person camera inversion and manual rotation speed
 
-This experimental feature modifies original camera behavior using N64Recomp's
+This optional feature modifies original camera behavior using N64Recomp's
 instruction hooks rather than controller remapping or hand-maintained generated C.
 It targets the USA v1.0 ROM and builds on the fork's native-hook implementation
-(commit `7079aff` on `camera-controls`).
+(first introduced at commit `7079aff`, now incorporated in `main`).
 
 ## Source of truth and reproducibility
 
@@ -105,18 +105,10 @@ most 80 camera requests and 100 frames following each request per session.
 
 ## Validation status
 
-- Patch architecture: native TOML hooks, not manual generated-code edits.
-- ROM-based regeneration: passed, with no unrelated generated code differences.
-- Static hook consistency: passed.
-- Native helpers: compiled and exercised against synthetic guest camera memory
-  at 1x and 4x, including an override request, changed priority and target.
-- Live settings and neutral fast path: host-side tests passed; pinned frontend
-  API signatures verified; `TooieCameraSettingsTests` is built and run by CI,
-  but the complete Windows UI build is not yet tested.
-- Actual gameplay at the new speed and with live UI changes: **not yet tested**.
+- Native TOML-hook consistency: **10 camera hooks** verified by `tools/tests/test_camera_hooks.py`.
+- Original USA v1.0 ROM regeneration: previously reproduced, with no unrelated generated C output differences after normalizing line endings.
+- Synthetic native-helper tests and live/neutral settings tests: passed. The Windows manual build workflow runs `TooieCameraSettingsTests`.
+- **Windows gameplay:** the live settings, horizontal inversion and manual-turn speed have been tested. Settings do not require a restart. This does **not** imply exhaustive coverage of every camera transition or another platform.
+- With inversion Off, speed 1.00× and diagnostics Off, the code retains its neutral fast path. A hook still executes, so this is not an instruction-for-instruction guarantee of equivalence to an unmodified binary.
 
-The speed option remains experimental until verified in-game. In particular,
-other camera modes, scripted sequences, transitions at very short targets and
-switching between camera states should be checked before proposing an upstream
-pull request. The new camera tab and live updates still need an actual Windows
-build and in-game validation.
+This feature has been merged into the fork's `main`. The original upstream code remains a separate project; see the fork README for its status and relationship to upstream.
