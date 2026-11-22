@@ -3,10 +3,12 @@
 // one core input hook translates the N64 controller packet immediately before
 // the game copies it into its processed input state (func_8001608C). Hooking
 // the async osContGetReadData producer risks tearing/racing with that copy.
-// Both hook declarations live in banjotooie.us.toml
+// Later first-person hooks observe and optionally adjust camera pitch.
+// All hook declarations live in banjotooie.us.toml
 // so a subsequent N64Recomp run recreates the calls automatically.
 #include "tooie_breegull_controls.h"
 #include "tooie_breegull_remap.hpp"
+#include "tooie_breegull_pitch.hpp"
 #include "tooie_breegull_settings.hpp"
 #include "tooie_breegull_trace.hpp"
 #include "recompinput/players.h"
@@ -30,6 +32,7 @@ std::atomic<bool> enabled{false};
 // No physical SDL axis is used for gameplay translation.
 std::atomic<uint64_t> mapped_look{0};
 std::atomic<bool> invert_vertical{true};
+std::atomic<float> normal_vertical_speed{1.0f};
 // Shared between the first-person game-state thread and the N64 controller
 // polling thread. A thread_local here made the pad hook see zero forever.
 // Observe the actor even with the toggle off, so turning it on while already
@@ -57,6 +60,12 @@ bool modern_controls_enabled() {
 }
 void set_invert_vertical_look(bool state) {
     invert_vertical.store(state, std::memory_order_release);
+}
+void set_normal_vertical_speed(float value) {
+    if (!std::isfinite(value)) value = 1.0f;
+    normal_vertical_speed.store(
+        std::clamp(value, min_vertical_speed, max_vertical_speed),
+        std::memory_order_release);
 }
 // Read the SAME profile slots and per-player input accessor as
 // recompinput::profiles::get_n64_input in the pinned RecompFrontend. This
@@ -265,4 +274,56 @@ extern "C" void tooie_breegull_hook_camera_trace(uint8_t* rdram,
         }
     }
     tooie::breegull::trace_camera(stage, player_state, sample);
+}
+
+// Pitch scaling and leveling suppression are game-side, not C-button input
+// manipulation. These two native hooks run in different, mutually exclusive
+// branches of func_808068E8_bsfirstp (manual look vs. target correction).
+// They intentionally leave R-held aiming, other modes, and Modern=Off alone.
+extern "C" void tooie_breegull_hook_pitch_delta(uint8_t* rdram,
+                                                recomp_context* ctx,
+                                                uint32_t path) {
+    using tooie::breegull::PitchPath;
+    if (!enabled.load(std::memory_order_acquire) || path > 1) return;
+
+    const uint32_t player = firstperson_player.load(std::memory_order_acquire);
+    if (!valid_guest_pointer(player, 0x18C)) return;
+    const gpr actor = guest_address(player);
+    const uint32_t state_ptr = static_cast<uint32_t>(MEM_W(0x120, actor));
+    if (!valid_guest_pointer(state_ptr, 8)) return;
+    const uint32_t state = static_cast<uint32_t>(
+        MEM_W(4, guest_address(state_ptr)));
+    // Both hook sites run before their respective epilogues restore SP.
+    // They preserve the first-person camera object at SP+0x1C. The manual
+    // calculation additionally preserves the original player at SP+0x20.
+    const uint32_t object = static_cast<uint32_t>(MEM_W(0x1C, ctx->r29));
+    if (!valid_guest_pointer(object, 0x210)) return;
+    const bool matching_object =
+        static_cast<uint32_t>(MEM_W(0x188, actor)) == object &&
+        (path != 1 ||
+         static_cast<uint32_t>(MEM_W(0x20, ctx->r29)) == player);
+    const uint32_t camera_mode = static_cast<uint32_t>(
+        MEM_W(0xC, guest_address(object)));
+
+    // The current game-consumed N64 packet contains the configured R binding.
+    // Do not change precision-aim pitch or transitions where R is held.
+    const gpr input = guest_address(0x80079B58u);
+    const bool r_held =
+        (static_cast<uint16_t>(MEM_H(0, input)) & tooie::breegull::r_aim) != 0;
+    if (!tooie::breegull::is_normal_breegull_pitch(
+            true, state, r_held, camera_mode, matching_object)) return;
+
+    const auto pitch_path = static_cast<PitchPath>(path);
+    const float speed = normal_vertical_speed.load(std::memory_order_acquire);
+    // func_808069BC_bsfirstp wrote the target angle to 0x208 before this
+    // hook. Leave nonzero automatic retargets alone; only stop the observed
+    // walk/stop-induced drift toward a level (zero-pitch) view.
+    float target = 0.0f;
+    if (pitch_path == PitchPath::TargetCorrection) {
+        const uint32_t bits = static_cast<uint32_t>(
+            MEM_W(0x208, guest_address(object)));
+        std::memcpy(&target, &bits, sizeof(target));
+    }
+    ctx->f0.fl = tooie::breegull::adjusted_pitch_delta(
+        ctx->f0.fl, pitch_path, true, speed, target);
 }

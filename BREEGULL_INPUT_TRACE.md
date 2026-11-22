@@ -105,3 +105,21 @@ The CSV should be under `input-traces/` beside the game executable, just as
 before. If some action unexpectedly levels the view, a short note about which
 step triggered it is useful but not required. The first diagnostic question is
 whether the candidate angle field changes at the corresponding transition.
+
+## Stage-2 interpretation and validation
+
+The 2026-11-22 Stage-1 recording (`breegull-input-20261122-191922-745-2.csv`)
+contained 5,734 before/after first-person pitch-update pairs, showing that
+field `0x20C` follows manual up/down looking and, during movement transitions,
+undergoes a systematic approximately `-current_pitch/6` adjustment toward
+zero. No `camera_before_reset`/`camera_after_reset` events were observed.
+This supports, but does not mathematically prove, that `0x20C` is the rendered
+pitch rather than a closely related internal camera angle.
+
+Stage 2 adds two **gameplay** hooks at the outputs of the separate normal
+manual-look and automatic-target-correction functions. When Modern Breegull
+is on, R is not held and the camera actor/state are validated, the former
+applies the configured `0.50x`–`3.00x` vertical multiplier; the latter cancels
+only corrections toward a zero-pitch target. The existing F9 camera rows
+continue to record the resultant pitch increments; they do not gain new
+columns, and Stage 2 remains subject to runtime verification.

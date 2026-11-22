@@ -47,9 +47,10 @@ menu blocks gameplay input, the sampled look strengths are zero.
 The native game hooks in `banjotooie.us.toml` remain authoritative. The
 first-person overlay hook observes the player actor; the game-consumer hook
 modifies only the N64 controller packet just before `func_8001608C` copies it.
-Neither the TOML hooks nor `RecompiledFuncs/*.c` are changed here. The
-read-only producer/consumer trace hooks remain in place. Never modify
-generated C without a corresponding TOML hook definition.
+Stage-1 camera diagnostics and Stage-2 pitch changes add separate first-person
+native hooks, all declared in TOML and mirrored in generated C. The read-only
+producer/consumer trace hooks remain in place. Never modify generated C
+without a corresponding TOML hook definition.
 
 Trace recordings established two state-filter defects: `0xD1` occurs during
 movement and `0xD8` while firing eggs (and for some frames afterward). Both
@@ -74,8 +75,10 @@ player pointer. Tracing remains independently opt-in with **F9**.
 N64 packet: `0x80079B40`, copied by `func_8001608C`; game-side copy
 `0x80079B58`. The observed first-person player comes from overlay 108,
 `bsfirstp_entrypoint_1`. See `BREEGULL_INPUT_TRACE.md` for optional F9 CSV
-recordings. The recorder confirms input values copied by the game, **not**
-actual world movement or camera orientation.
+recordings. The input rows confirm controller values copied by the game, **not** actual
+world movement. Stage-1 camera rows separately expose a candidate pitch value
+and its angular increments, whose correspondence was checked against the
+recorded movement-transition observations.
 
 Run tests with Python and a C++20 compiler:
 
@@ -85,3 +88,54 @@ python tools/tests/test_camera_hooks.py
 c++ -std=c++20 -Iinclude tools/tests/breegull_remap_test.cpp -o breegull_remap_test
 ./breegull_remap_test
 ```
+
+## Stage 2 — ordinary vertical look speed and automatic leveling
+
+This feature requires **Modern Breegull Blaster controls**. The original
+control scheme is left unchanged; R-held precision aiming, horizontal yaw,
+third-person camera behavior and normal Egg Aim are also untouched.
+
+- **Invert Vertical Look** is disabled/greyed out in the menu while Modern is
+  off; its stored preference is retained for when Modern is enabled again.
+- **Vertical Look Speed (Outside R-Aim)** is a live, persistent numeric slider,
+  from **0.50x** to **3.00x** in **0.25x** steps, default **1.00x**, also
+  disabled while Modern is off. **1.00x is the original *vertical* pitch speed**;
+  it does not imply matching the original horizontal rotation speed.
+- Ordinary Breegull C-up/down are **digital buttons**. The slider does not
+  multiply button values, simulate taps or change the N64 stick. Instead it
+  scales the *manual camera angular increment* returned by the original
+  first-person `func_808069FC_bsfirstp` calculation, after its smoothing
+  computation and before the caller updates/clamps the pitch.
+- Separately, while in the same scoped modern/non-R context, it suppresses
+  the automatic **target-to-zero pitch correction** returned by
+  `func_808069BC_bsfirstp`. This is the correction that repeatedly leveled
+  pitch after movement transitions in the Stage-1 F9 trace. Automatic
+  corrections toward **nonzero targets** are preserved.
+
+The functions are selected in separate branches of
+`func_808068E8_bsfirstp`. Both new native hooks are declared in
+`banjotooie.us.toml`, implemented in `src/breegull_controls.cpp`, and
+regenerated into `RecompiledFuncs/funcs_45.c`. Each hook checks the live
+first-person actor, the validated Breegull player state, its corresponding
+camera object, the original camera submode and the latest game-consumed R
+button. The disabled/original path returns without altering guest inputs or
+camera register values. Stage-1 F9 camera observations remain available.
+
+### Verification status and gameplay testing
+
+The first-person pitch field `0x20C` was observed in the Stage-1 CSV to track
+manual C-up/down looking as well as unwanted leveling. For the latter, the
+camera adjustment repeatedly matched `-pitch/6` and no explicit reset events
+were observed. This numerical correlation and source branch trace support
+these hook choices, but **the Stage-2 Windows executable and gameplay have not
+been tested yet**. In particular, validate whether the chosen manual pitch
+multiplier affects the actual vertical turning rate, and whether suppressing
+the target-to-zero correction prevents *all* the observed movement-transition
+leveling without interfering with intentional camera state changes.
+
+Suggested checks: at 1.00x confirm normal C-up/down speed, at 2.00x confirm
+meaningfully faster maximum pitch movement, and at 0.50x confirm slower
+movement. Walk forward/backward, stop, strafe and fire after looking up or
+down with the look stick released. Hold R to check precision pitch remains
+unchanged. Disable Modern to verify original leveling returns. Confirm both
+new disabled-menu dependencies and setting persistence after restart.

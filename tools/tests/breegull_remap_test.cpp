@@ -1,4 +1,5 @@
 #include "tooie_breegull_remap.hpp"
+#include "tooie_breegull_pitch.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -109,5 +110,48 @@ int main() {
             (firing.buttons & c_right) != 0 && firing.stick_x == 80,
             "egg firing keeps strafe, yaw and firing button");
 
-    std::puts("PASS: Breegull mapped-profile analog, R aim and inversion");
+    // R-held and normal look can share state CA or D1. The control scheme,
+    // guest actor/camera match, R bit and camera submode all matter.
+    using tooie::breegull::is_normal_breegull_pitch;
+    require(is_normal_breegull_pitch(true, 0xCA, false, 0, true),
+            "ordinary Breegull camera accepts CA");
+    require(is_normal_breegull_pitch(true, 0xD1, false, 0, true),
+            "ordinary Breegull camera accepts D1");
+    require(is_normal_breegull_pitch(true, 0xD8, false, 0, true),
+            "ordinary Breegull egg-firing camera accepts D8");
+    require(!is_normal_breegull_pitch(true, 0xCA, true, 0, true),
+            "R-held precision aiming is unaffected");
+    require(!is_normal_breegull_pitch(false, 0xCA, false, 0, true),
+            "original control scheme never alters pitch");
+    require(!is_normal_breegull_pitch(true, 0xAA, false, 0, true),
+            "outside Breegull no pitch modification");
+    require(!is_normal_breegull_pitch(true, 0xCA, false, 1, true),
+            "different first-person camera mode remains untouched");
+    require(!is_normal_breegull_pitch(true, 0xCA, false, 0, false),
+            "unrelated camera object remains untouched");
+
+    // Pitch correction comes from two different original guest functions.
+    // The original path, any R-aiming path, and the neutral 1.0x setting
+    // must remain unchanged. Normal look speed scales the *angle increment*,
+    // not the digital C-button bit value or an N64 stick capped at 80.
+    using tooie::breegull::PitchPath;
+    using tooie::breegull::adjusted_pitch_delta;
+    require(adjusted_pitch_delta(2.0f, PitchPath::ManualLook, false, 3.0f) == 2.0f,
+            "original-control manual look remains neutral");
+    require(adjusted_pitch_delta(-4.0f, PitchPath::TargetCorrection, false, 3.0f) == -4.0f,
+            "original-control leveling remains unchanged");
+    require(adjusted_pitch_delta(2.0f, PitchPath::ManualLook, true, 1.0f) == 2.0f,
+            "default manual look retains original game speed");
+    require(adjusted_pitch_delta(2.0f, PitchPath::ManualLook, true, 2.0f) == 4.0f,
+            "ordinary manual pitch is genuinely faster at 2x");
+    require(adjusted_pitch_delta(-2.0f, PitchPath::ManualLook, true, 0.5f) == -1.0f,
+            "ordinary manual pitch slows both directions at 0.5x");
+    require(adjusted_pitch_delta(-4.0f, PitchPath::TargetCorrection, true, 3.0f) == 0.0f,
+            "center-target correction is suppressed independently of speed");
+    require(adjusted_pitch_delta(-4.0f, PitchPath::TargetCorrection, true, 3.0f, 12.0f) == -4.0f,
+            "non-center automatic camera targeting remains intact");
+    require(adjusted_pitch_delta(2.0f, PitchPath::ManualLook, true, 10.0f) == 6.0f,
+            "manual pitch multiplier is bounded to menu range");
+
+    std::puts("PASS: Breegull mapped-profile controls and scoped pitch adjustments");
 }

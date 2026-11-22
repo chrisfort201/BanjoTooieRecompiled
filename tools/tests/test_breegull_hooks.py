@@ -14,6 +14,8 @@ expected = [
     ("func_8080682C_bsfirstp", 0x808068D8, "tooie_breegull_hook_camera_trace(rdram, ctx, 1);", "funcs_45.c"),
     ("func_808067B0_bsfirstp", 0x808067CC, "tooie_breegull_hook_camera_trace(rdram, ctx, 2);", "funcs_44.c"),
     ("func_808067B0_bsfirstp", 0x808067D8, "tooie_breegull_hook_camera_trace(rdram, ctx, 3);", "funcs_44.c"),
+    ("func_808069BC_bsfirstp", 0x808069F0, "tooie_breegull_hook_pitch_delta(rdram, ctx, 0);", "funcs_45.c"),
+    ("func_808069FC_bsfirstp", 0x80806AC0, "tooie_breegull_hook_pitch_delta(rdram, ctx, 1);", "funcs_45.c"),
 ]
 for name, address, call, filename in expected:
     assert sum(h.get("func") == name and h.get("before_vram") == address
@@ -24,4 +26,4 @@ for name, address, call, filename in expected:
     addr_comment = f"// 0x{address:08X}:"
     assert body.index(call) < body.index(addr_comment)
     assert not body[body.index(call) + len(call):body.index(addr_comment)].strip()
-print("PASS: 8 Breegull native TOML hooks (4 input + 4 camera trace) match generated C positions")
+print("PASS: 10 Breegull native TOML hooks (4 input + 4 camera trace + 2 pitch) match generated C positions")

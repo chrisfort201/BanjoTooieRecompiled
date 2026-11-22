@@ -465,6 +465,7 @@ RECOMP_FUNC void func_808069BC_bsfirstp(uint8_t* rdram, recomp_context* ctx) {
     ctx->r1 = S32(0X40C0 << 16);
     // 0x808069EC: mtc1        $at, $f6
     ctx->f6.u32l = ctx->r1;
+    tooie_breegull_hook_pitch_delta(rdram, ctx, 0);
     // 0x808069F0: addiu       $sp, $sp, 0x20
     ctx->r29 = ADD32(ctx->r29, 0X20);
     // 0x808069F4: jr          $ra
@@ -650,6 +651,7 @@ L_80806AB0:
     // 0x80806ABC: lw          $a0, 0x20($sp)
     ctx->r4 = MEM_W(ctx->r29, 0X20);
     after_2:
+    tooie_breegull_hook_pitch_delta(rdram, ctx, 1);
     // 0x80806AC0: lw          $ra, 0x14($sp)
     ctx->r31 = MEM_W(ctx->r29, 0X14);
     // 0x80806AC4: addiu       $sp, $sp, 0x20

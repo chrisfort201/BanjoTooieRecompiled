@@ -18,6 +18,10 @@ void tooie_breegull_hook_produced(uint8_t* rdram, recomp_context* ctx);
 // They NEVER modify recomp_context, guest RDRAM, or gameplay settings.
 void tooie_breegull_hook_camera_trace(uint8_t* rdram, recomp_context* ctx,
                                      uint32_t stage);
+// Stage 2: adjust only the output register of the two identified first-person
+// pitch calculation branches. 0 = target-to-center correction; 1 = manual look.
+void tooie_breegull_hook_pitch_delta(uint8_t* rdram, recomp_context* ctx,
+                                    uint32_t path);
 #ifdef __cplusplus
 }
 #endif
