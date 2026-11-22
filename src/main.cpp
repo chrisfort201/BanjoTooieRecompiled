@@ -58,6 +58,7 @@
 #include "tooie_visibility.hpp"
 #include "tooie_camera_settings.hpp"
 #include "tooie_breegull_settings.hpp"
+#include "tooie_breegull_trace.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -152,6 +153,7 @@ void update_gfx(void*) {
     }
     recompinput::handle_events();
     tooie::breegull::sample_right_stick();
+    tooie::breegull::trace_hotkey(window);
     int width = 0, height = 0;
     SDL_GetWindowSize(window, &width, &height);
     tooie::visibility::update_display_size(width, height);

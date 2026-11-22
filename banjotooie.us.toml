@@ -624,3 +624,16 @@ text = "tooie_breegull_hook_player(rdram, ctx);"
 func = "func_8001608C"
 before_vram = 0x800160C4
 text = "tooie_breegull_hook_pad(rdram, ctx);"
+
+# Read-only instrumentation: the game has just copied its OSContPad to the
+# processed-input buffer at 0x80079B58. This hook never changes guest state.
+[[patches.hook]]
+func = "func_8001608C"
+before_vram = 0x800160E8
+text = "tooie_breegull_hook_consumed(rdram, ctx);"
+
+# Read-only observer following osContGetReadData in the producer thread.
+[[patches.hook]]
+func = "func_800165F0"
+before_vram = 0x8001661C
+text = "tooie_breegull_hook_produced(rdram, ctx);"

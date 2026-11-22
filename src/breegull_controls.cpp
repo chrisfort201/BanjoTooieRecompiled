@@ -8,6 +8,7 @@
 #include "tooie_breegull_controls.h"
 #include "tooie_breegull_remap.hpp"
 #include "tooie_breegull_settings.hpp"
+#include "tooie_breegull_trace.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -55,23 +56,30 @@ bool modern_controls_enabled() {
     return enabled.load(std::memory_order_acquire);
 }
 void sample_right_stick() {
-    if (!enabled.load(std::memory_order_relaxed)) {
+    const bool is_enabled = enabled.load(std::memory_order_relaxed);
+    if (!is_enabled && !trace_active()) {
         right_axis.store(0, std::memory_order_relaxed);
         return;
     }
     // RecompFrontend already opens SDL controllers. This is read-only; it
     // does not open, close, remap or take ownership of any controller.
     uint32_t axis = 0;
+    int16_t raw_lx = 0, raw_ly = 0, raw_rx = 0, raw_ry = 0;
     const int count = SDL_NumJoysticks();
     for (int i = 0; i < count; ++i) {
         if (!SDL_IsGameController(i)) continue;
         const SDL_JoystickID instance = SDL_JoystickGetDeviceInstanceID(i);
         SDL_GameController* controller = SDL_GameControllerFromInstanceID(instance);
         if (!controller) continue;
+        const int16_t lx = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX);
+        const int16_t ly = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY);
         const int16_t x = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTX);
-        axis = 0x10000u | static_cast<uint16_t>(x);
+        const int16_t ry = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTY);
+        raw_lx = lx; raw_ly = ly; raw_rx = x; raw_ry = ry;
+        if (is_enabled) axis = 0x10000u | static_cast<uint16_t>(x);
         break; // Single player: first active game controller.
     }
+    if (trace_active()) trace_raw_axes(raw_lx, raw_ly, raw_rx, raw_ry);
     right_axis.store(axis, std::memory_order_release);
 }
 } // namespace tooie::breegull
@@ -86,34 +94,72 @@ extern "C" void tooie_breegull_hook_player(uint8_t*, recomp_context* ctx) {
 }
 
 extern "C" void tooie_breegull_hook_pad(uint8_t* rdram, recomp_context*) {
-    // Exact neutral path: no guest reads, guest writes or register mutations.
-    if (!enabled.load(std::memory_order_acquire)) return;
-
-    const uint32_t player = firstperson_player.load(std::memory_order_acquire);
-    if (!valid_guest_pointer(player, 0x124)) return;
-    const uint32_t state_ptr = static_cast<uint32_t>(
-        MEM_W(0x120, guest_address(player)));
-    if (!valid_guest_pointer(state_ptr, 8)) return;
-    const uint32_t state = static_cast<uint32_t>(
-        MEM_W(4, guest_address(state_ptr)));
-    if (!blaster_state(state)) return;
-
-    const uint32_t sampled = right_axis.load(std::memory_order_acquire);
-    if ((sampled & 0x10000u) == 0) return; // No SDL controller; preserve input.
-
-    // The gameplay input consumer will read this packet immediately after
-    // the native hook returns. No other game engine state is overridden.
-    constexpr uint32_t pad_addr = 0x80079B40u; // controller 0, OSContPad[0]
-    const gpr pad = guest_address(pad_addr);
+    // The normal off path has zero guest reads/writes, as before. Recording is
+    // explicitly opt-in; while recording we read input even with the feature off.
+    const bool active = enabled.load(std::memory_order_acquire);
+    const bool recording = tooie::breegull::trace_active();
+    if (!active && !recording) return;
+    const gpr pad = guest_address(0x80079B40u);
     tooie::breegull::Pad original{
         static_cast<uint16_t>(MEM_H(0, pad)),
         static_cast<int8_t>(MEM_B(2, pad)),
         static_cast<int8_t>(MEM_B(3, pad)),
     };
-    const int16_t right_x = static_cast<int16_t>(sampled & 0xFFFFu);
-    const auto changed = tooie::breegull::remap(original, right_x);
-    // Preserve Y, C-up/down, attack buttons and error byte exactly. The game
-    // handles movement and camera motion; no custom physics or view controller.
-    MEM_H(0, pad) = changed.buttons;
-    MEM_B(2, pad) = changed.stick_x;
+    auto changed = original;
+    const char* reason = "toggle_off";
+    uint32_t state = 0;
+    if (active) {
+        const uint32_t player = firstperson_player.load(std::memory_order_acquire);
+        if (!valid_guest_pointer(player, 0x124)) {
+            reason = "player_not_observed";
+        } else {
+            const uint32_t state_ptr = static_cast<uint32_t>(
+                MEM_W(0x120, guest_address(player)));
+            if (!valid_guest_pointer(state_ptr, 8)) {
+                reason = "state_ptr_invalid";
+            } else {
+                state = static_cast<uint32_t>(MEM_W(4, guest_address(state_ptr)));
+                if (!blaster_state(state)) {
+                    reason = "not_blaster_state";
+                } else {
+                    const uint32_t sampled = right_axis.load(std::memory_order_acquire);
+                    if ((sampled & 0x10000u) == 0) {
+                        reason = "no_sdl_controller";
+                    } else {
+                        reason = "translated";
+                        changed = tooie::breegull::remap(original,
+                            static_cast<int16_t>(sampled & 0xFFFFu));
+                        MEM_H(0, pad) = changed.buttons;
+                        MEM_B(2, pad) = changed.stick_x;
+                    }
+                }
+            }
+        }
+    }
+    if (recording) tooie::breegull::trace_packet(original, changed, state, reason);
+}
+
+extern "C" void tooie_breegull_hook_produced(uint8_t* rdram, recomp_context*) {
+    if (!tooie::breegull::trace_active()) return;
+    // A read-only snapshot immediately after osContGetReadData updates the
+    // producer buffer. This is not the same thread as the game input consumer.
+    const gpr producer = guest_address(0x80079B40u);
+    tooie::breegull::trace_produced({
+        static_cast<uint16_t>(MEM_H(0, producer)),
+        static_cast<int8_t>(MEM_B(2, producer)),
+        static_cast<int8_t>(MEM_B(3, producer)),
+    });
+}
+
+extern "C" void tooie_breegull_hook_consumed(uint8_t* rdram, recomp_context*) {
+    if (!tooie::breegull::trace_active()) return;
+    // 0x800160D8..0x800160E4 copied OSContPad[0] into this game-side buffer.
+    // This is the packet actually copied by the game, not a claim that the
+    // movement state machine subsequently executed a particular action.
+    const gpr copied = guest_address(0x80079B58u);
+    tooie::breegull::trace_consumed({
+        static_cast<uint16_t>(MEM_H(0, copied)),
+        static_cast<int8_t>(MEM_B(2, copied)),
+        static_cast<int8_t>(MEM_B(3, copied)),
+    });
 }

@@ -16177,6 +16177,7 @@ RECOMP_FUNC void func_8001608C(uint8_t* rdram, recomp_context* ctx) {
     // 0x800160E4: sh          $t8, 0x0($v0)
     MEM_H(0X0, ctx->r2) = ctx->r24;
     after_2:
+    tooie_breegull_hook_consumed(rdram, ctx);
     // 0x800160E8: beq         $v0, $zero, L_80016118
     if (ctx->r2 == 0) {
         // 0x800160EC: or          $a0, $s0, $zero
@@ -17192,6 +17193,7 @@ RECOMP_FUNC void func_800165F0(uint8_t* rdram, recomp_context* ctx) {
     // 0x80016618: addiu       $a0, $a0, -0x64C0
     ctx->r4 = ADD32(ctx->r4, -0X64C0);
     after_1:
+    tooie_breegull_hook_produced(rdram, ctx);
     // 0x8001661C: lw          $ra, 0x14($sp)
     ctx->r31 = MEM_W(ctx->r29, 0X14);
 L_80016620:

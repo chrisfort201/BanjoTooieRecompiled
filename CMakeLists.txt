@@ -110,6 +110,7 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/src/camera_config.cpp
     ${CMAKE_SOURCE_DIR}/src/camera_diagnostics.cpp
     ${CMAKE_SOURCE_DIR}/src/breegull_controls.cpp
+    ${CMAKE_SOURCE_DIR}/src/breegull_trace.cpp
     ${CMAKE_SOURCE_DIR}/src/breegull_config.cpp
     ${CMAKE_SOURCE_DIR}/src/register_overlays.cpp
     ${CMAKE_SOURCE_DIR}/src/rom_decompression.cpp

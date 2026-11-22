@@ -8,6 +8,8 @@ hooks = tomllib.loads((root / "banjotooie.us.toml").read_text())["patches"]["hoo
 expected = [
     ("bsfirstp_entrypoint_1", 0x808000E4, "tooie_breegull_hook_player(rdram, ctx);", "funcs_44.c"),
     ("func_8001608C", 0x800160C4, "tooie_breegull_hook_pad(rdram, ctx);", "funcs_0.c"),
+    ("func_8001608C", 0x800160E8, "tooie_breegull_hook_consumed(rdram, ctx);", "funcs_0.c"),
+    ("func_800165F0", 0x8001661C, "tooie_breegull_hook_produced(rdram, ctx);", "funcs_0.c"),
 ]
 for name, address, call, filename in expected:
     assert sum(h.get("func") == name and h.get("before_vram") == address
@@ -18,4 +20,4 @@ for name, address, call, filename in expected:
     addr_comment = f"// 0x{address:08X}:"
     assert body.index(call) < body.index(addr_comment)
     assert not body[body.index(call) + len(call):body.index(addr_comment)].strip()
-print("PASS: 2 Breegull native TOML hooks match committed generated C positions")
+print("PASS: 4 Breegull native TOML hooks match committed generated C positions")

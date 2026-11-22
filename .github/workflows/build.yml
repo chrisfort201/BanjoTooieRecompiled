@@ -107,7 +107,7 @@ jobs:
                       'build-cmake/dxcompiler.dll',
                       'build-cmake/dxil.dll') $stage
           Copy-Item -Recurse 'build-cmake/assets' "$stage/assets"
-          Copy-Item @('CAMERA_PATCH.md', 'BREEGULL_CONTROLS.md', 'README.md', 'COPYING') $stage
+          Copy-Item @('CAMERA_PATCH.md', 'BREEGULL_CONTROLS.md', 'BREEGULL_INPUT_TRACE.md', 'README.md', 'COPYING') $stage
           $basename = '${{ steps.package_name.outputs.basename }}'
           Compress-Archive -Path "$stage/*" -DestinationPath "package/$basename.zip" -Force
           Get-FileHash "$stage/BanjoTooieRecompiled.exe" -Algorithm SHA256 | Format-List
