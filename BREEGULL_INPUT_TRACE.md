@@ -7,7 +7,7 @@ The earlier movement-state and strafing defects have been fixed. This document d
 - Focus the game window and press **F9** to start capture. Press **F9** again to save and stop.
 - Windows displays a non-activating on-screen recording/saved/error notice; on other platforms the window title is used instead. Failure to display an indicator does not itself prove that the CSV failed to save.
 - Files are written to `input-traces/` beside the executable, with a bounded maximum of **18,000 N64 input polls** (roughly five minutes at 60 polls/second).
-- The recorder does not alter controller mappings, game movement or camera angles. Recording is independent of the Modern Breegull setting. Sharing a recording may reveal controller/key activity; share it intentionally.
+- The recorder does not alter controller mappings, game movement or camera angles. Recording is independent of the Modern Breegull setting.
 
 The current CSV header has **23 columns**:
 
